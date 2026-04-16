@@ -96,6 +96,8 @@ def webhook():
         after_market_order=False 
     )
     
+    print(f"📡 Dhan API Order Response: {response}")
+    
     return jsonify(response), 200
 
 if __name__ == '__main__':
