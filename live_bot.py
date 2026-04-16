@@ -40,8 +40,12 @@ def get_security_id(symbol):
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    data = request.json
+    # force=True ignores the Content-Type header which TradingView sometimes misses
+    data = request.get_json(force=True, silent=True)
+    
     if not data or data.get('secret') != SECRET_TOKEN:
+        print(f"🔴 403 ERROR! Received Data: {data}")
+        print(f"🔴 Raw Payload: {request.data}")
         return jsonify({"error": "Unauthorized"}), 403
 
     symbol = data.get('symbol')
