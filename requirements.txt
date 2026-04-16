@@ -1,0 +1,4 @@
+flask==3.0.0
+dhanhq
+pandas==2.2.0
+requests
