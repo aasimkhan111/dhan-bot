@@ -22,40 +22,50 @@ SCRIP_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
 # Added low_memory=False to fix the DtypeWarning
 df = pd.read_csv(SCRIP_URL, low_memory=False)
 
-def get_security_id(symbol):
+def get_security_id(symbol, price=0, option_type=None):
     try:
         symbol = symbol.upper()
-        # Handle -I or -II or -III (common for current/next month futures)
-        if symbol.endswith('-I'):
+        # --- DYNAMIC ATM LOGIC ---
+        if "-ATM" in symbol:
+            base = symbol.split("-ATM")[0] # e.g., 'BANKNIFTY'
+            if price == 0:
+                print("❌ Error: price=0 received for ATM request.")
+                return None, None
+            
+            # Calculate Strike (Step of 100 for BankNifty, 50 for Nifty)
+            step = 100 if "BANKNIFTY" in base else 50
+            strike = round(price / step) * step
+            print(f"🎯 Calculating ATM for {base}: Price {price} -> Strike {strike}")
+            
+            # Find the option with this strike and nearest expiry
+            match = df[(df['SEM_INSTRUMENT_NAME'] == 'OPTIDX') & 
+                       (df['SM_SYMBOL_NAME'].str.contains(base, na=False)) &
+                       (df['SEM_STRIKE_PRICE'] == strike) &
+                       (df['SEM_OPTION_TYPE'] == option_type)]
+            
+        elif symbol.endswith('-I'):
             base = symbol.replace('-I', '')
-            # Look for FUTIDX or FUTSTK starting with the base name
             match = df[(df['SEM_INSTRUMENT_NAME'].isin(['FUTIDX', 'FUTSTK'])) & 
                        (df['SEM_TRADING_SYMBOL'].str.startswith(base)) &
-                       (df['SEM_EXM_EXCH_ID'] == 'NSE')] # Dhan Master uses 'NSE' for the scrip list segment but NFO for order placement
+                       (df['SEM_EXM_EXCH_ID'] == 'NSE')]
         else:
-            # Try exact match on Trading Symbol first
+            # Regular exact match
             match = df[(df['SEM_TRADING_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
-            
-            # If not found, try Custom Symbol
             if match.empty:
                 match = df[(df['SEM_CUSTOM_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
 
         if not match.empty:
-            # Sort by expiry if it's F&O to get the nearest one
+            # Sort by expiry to get the nearest one
             if 'SEM_EXPIRY_DATE' in match.columns:
                 match = match.sort_values('SEM_EXPIRY_DATE')
             
             sec_id = str(match.iloc[0]['SEM_SMST_SECURITY_ID'])
             inst_name = str(match.iloc[0]['SEM_INSTRUMENT_NAME'])
             final_symbol = str(match.iloc[0]['SEM_TRADING_SYMBOL'])
-            print(f"✅ Found Symbol: {final_symbol} | ID: {sec_id} | Type: {inst_name}")
+            print(f"✅ Found: {final_symbol} | ID: {sec_id}")
             return sec_id, inst_name
         else:
-            # List some similar symbols to help the user
             print(f"❌ Symbol {symbol} not found.")
-            similar = df[df['SEM_TRADING_SYMBOL'].str.contains(symbol[:5], na=False)]['SEM_TRADING_SYMBOL'].head(5).tolist()
-            if similar:
-                print(f"💡 Did you mean one of these? {similar}")
             return None, None
     except Exception as e:
         print(f"Lookup Error: {e}")
@@ -67,12 +77,14 @@ def webhook():
     data = request.get_json(force=True, silent=True)
     
     if not data or data.get('secret') != SECRET_TOKEN:
-        print(f"🔴 403 ERROR! Received Data: {data}")
-        print(f"🔴 Raw Payload: {request.data}")
+        print(f"🔴 403 ERROR! Data: {data}")
         return jsonify({"error": "Unauthorized"}), 403
 
     symbol = data.get('symbol')
-    sec_id, inst_name = get_security_id(symbol)
+    price = float(data.get('price', 0))
+    opt_type = data.get('option_type', 'CE')
+    
+    sec_id, inst_name = get_security_id(symbol, price, opt_type)
 
     if not sec_id:
         return jsonify({"error": f"Symbol {symbol} not found"}), 400
