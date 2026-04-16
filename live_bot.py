@@ -7,7 +7,7 @@ app = Flask(__name__)
 # --- LIVE CONFIG ---
 # Replace these with your exact Client ID and Access Token from your main LIVE PORTAL!
 CLIENT_ID = "1100819221"
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc2MzI5OTMxLCJpYXQiOjE3NzYyNDM1MzEsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAwODE5MjIxIn0.0NguK60rKoPFW3tVZw9whFGnPF7-9VNb-doHit01lWAq0IPF3ac-lxO8qfVM73o5qn487DjQKoBKF-kAA7wLEw"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc2NDE3OTAwLCJpYXQiOjE3NzYzMzE1MDAsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAwODE5MjIxIn0.YiHQ7Es30e_BfxOZXFd8moPSofe4ORUXp-00fRwYMBzxMBWiw8ymUNpg_F4gHTkR47eZvC0_0Aa5OxHaP7r9gQ"
 SECRET_TOKEN = "JunnarTrader2026"
 
 # Connect to the Live Trading System
