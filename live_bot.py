@@ -24,15 +24,38 @@ df = pd.read_csv(SCRIP_URL, low_memory=False)
 
 def get_security_id(symbol):
     try:
-        # Search in both NSE (Cash) and NFO (Futures & Options)
-        match = df[(df['SEM_TRADING_SYMBOL'].str.upper() == symbol.upper()) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
-        
+        symbol = symbol.upper()
+        # Handle -I or -II or -III (common for current/next month futures)
+        if symbol.endswith('-I'):
+            base = symbol.replace('-I', '')
+            # Look for FUTIDX or FUTSTK starting with the base name
+            match = df[(df['SEM_INSTRUMENT_NAME'].isin(['FUTIDX', 'FUTSTK'])) & 
+                       (df['SEM_TRADING_SYMBOL'].str.startswith(base)) &
+                       (df['SEM_EXM_EXCH_ID'] == 'NSE')] # Dhan Master uses 'NSE' for the scrip list segment but NFO for order placement
+        else:
+            # Try exact match on Trading Symbol first
+            match = df[(df['SEM_TRADING_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
+            
+            # If not found, try Custom Symbol
+            if match.empty:
+                match = df[(df['SEM_CUSTOM_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
+
         if not match.empty:
+            # Sort by expiry if it's F&O to get the nearest one
+            if 'SEM_EXPIRY_DATE' in match.columns:
+                match = match.sort_values('SEM_EXPIRY_DATE')
+            
             sec_id = str(match.iloc[0]['SEM_SMST_SECURITY_ID'])
             inst_name = str(match.iloc[0]['SEM_INSTRUMENT_NAME'])
+            final_symbol = str(match.iloc[0]['SEM_TRADING_SYMBOL'])
+            print(f"✅ Found Symbol: {final_symbol} | ID: {sec_id} | Type: {inst_name}")
             return sec_id, inst_name
         else:
-            print(f"Symbol {symbol} not found in NSE segment.")
+            # List some similar symbols to help the user
+            print(f"❌ Symbol {symbol} not found.")
+            similar = df[df['SEM_TRADING_SYMBOL'].str.contains(symbol[:5], na=False)]['SEM_TRADING_SYMBOL'].head(5).tolist()
+            if similar:
+                print(f"💡 Did you mean one of these? {similar}")
             return None, None
     except Exception as e:
         print(f"Lookup Error: {e}")
