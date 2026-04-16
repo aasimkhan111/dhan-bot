@@ -24,8 +24,8 @@ df = pd.read_csv(SCRIP_URL, low_memory=False)
 
 def get_security_id(symbol):
     try:
-        # FNO symbols have mixed case (e.g. Jun2024), so making the search entirely case-insensitive
-        match = df[(df['SEM_TRADING_SYMBOL'].str.upper() == symbol.upper()) & (df['SEM_EXM_EXCH_ID'] == 'NSE')]
+        # Search in both NSE (Cash) and NFO (Futures & Options)
+        match = df[(df['SEM_TRADING_SYMBOL'].str.upper() == symbol.upper()) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
         
         if not match.empty:
             sec_id = str(match.iloc[0]['SEM_SMST_SECURITY_ID'])
