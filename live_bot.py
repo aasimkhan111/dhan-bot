@@ -25,17 +25,26 @@ df = pd.read_csv(SCRIP_URL, low_memory=False)
 def get_security_id(symbol, price=0, option_type=None):
     try:
         symbol = symbol.upper()
-        # --- DYNAMIC ATM LOGIC ---
-        if "-ATM" in symbol:
-            base = symbol.split("-ATM")[0] # e.g., 'BANKNIFTY'
+        # --- DYNAMIC ATM/ITM LOGIC ---
+        if "-ATM" in symbol or "-ITM" in symbol:
+            base = symbol.split("-ATM")[0].split("-ITM")[0]
             if price == 0:
-                print("❌ Error: price=0 received for ATM request.")
+                print(f"❌ Error: price=0 received for {symbol} request.")
                 return None, None
             
             # Calculate Strike (Step of 100 for BankNifty, 50 for Nifty)
             step = 100 if "BANKNIFTY" in base else 50
             strike = round(price / step) * step
-            print(f"🎯 Calculating ATM for {base}: Price {price} -> Strike {strike}")
+            
+            # Apply ITM Offset (100 points for BankNifty, 50 for Nifty)
+            if "-ITM" in symbol:
+                if option_type == 'CE':
+                    strike -= step
+                else: 
+                    strike += step
+                print(f"🎯 Calculating ITM for {base}: Price {price} -> Strike {strike}")
+            else:
+                print(f"🎯 Calculating ATM for {base}: Price {price} -> Strike {strike}")
             
             # Find the option with this strike and nearest expiry
             # Searching multiple columns to be safe: SM_SYMBOL_NAME, SEM_CUSTOM_SYMBOL, SEM_TRADING_SYMBOL
