@@ -38,10 +38,23 @@ def get_security_id(symbol, price=0, option_type=None):
             print(f"🎯 Calculating ATM for {base}: Price {price} -> Strike {strike}")
             
             # Find the option with this strike and nearest expiry
+            # Searching multiple columns to be safe: SM_SYMBOL_NAME, SEM_CUSTOM_SYMBOL, SEM_TRADING_SYMBOL
             match = df[(df['SEM_INSTRUMENT_NAME'] == 'OPTIDX') & 
-                       (df['SM_SYMBOL_NAME'].str.contains(base, na=False)) &
-                       (df['SEM_STRIKE_PRICE'] == strike) &
-                       (df['SEM_OPTION_TYPE'] == option_type)]
+                       (df['SEM_STRIKE_PRICE'].astype(float) == float(strike)) &
+                       (df['SEM_OPTION_TYPE'] == option_type) &
+                       ((df['SM_SYMBOL_NAME'].str.contains(base, case=False, na=False)) | 
+                        (df['SEM_CUSTOM_SYMBOL'].str.contains(base, case=False, na=False)) |
+                        (df['SEM_TRADING_SYMBOL'].str.contains(base, case=False, na=False)))]
+            
+            if match.empty:
+                print(f"⚠️ No exact strike {strike} found for {base}. Trying fuzzy search...")
+                # Fallback: search just by base and option type to see what we have
+                match = df[(df['SEM_INSTRUMENT_NAME'] == 'OPTIDX') & 
+                           (df['SEM_OPTION_TYPE'] == option_type) &
+                           (df['SEM_TRADING_SYMBOL'].str.contains(base, na=False))].head(5)
+                if not match.empty:
+                    print(f"💡 Found similar strikes: {match['SEM_STRIKE_PRICE'].tolist()}")
+                return None, None
             
         elif symbol.endswith('-I'):
             base = symbol.replace('-I', '')
