@@ -106,31 +106,46 @@ def webhook():
         return jsonify({"error": f"Symbol {symbol} not found"}), 400
 
     # Auto-detect segment
-    exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
+    # exch_seg = 2 for NFO, 1 for NSE
+    exch_seg = 2 if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else 1
 
-    order_type = data.get('order_type', 'MARKET').upper()
-    dhan_order_type = dhan.MARKET if order_type == 'MARKET' else dhan.LIMIT
-    
-    # CRITICAL FIX: Set price to 0 for true Market orders to avoid "Limit" confusion in Dhan
-    final_price = 0.0 if order_type == 'MARKET' else float(data.get('price', 0))
+    order_type_str = data.get('order_type', 'MARKET').upper()
+    side_str = data.get('side', 'BUY').upper()
 
-    # Place order
-    print(f"🚀 PLACING {order_type} {data['side'].upper()} ORDER for {sec_id} | Price: {final_price} | Qty: {data['quantity']}")
+    # Place order - EXTREME MARKET MODE
+    print(f"🚀 ATTEMPTING {order_type_str} {side_str} ORDER for {sec_id} | Qty: {data.get('quantity')}")
     
-    response = dhan.place_order(
-        security_id=sec_id,
-        exchange_segment=exch_seg,
-        transaction_type=dhan.BUY if data['side'].lower() == 'buy' else dhan.SELL,
-        quantity=int(data['quantity']),
-        order_type=dhan_order_type,
-        product_type=dhan.INTRA,
-        price=final_price,
-        after_market_order=False 
-    )
-    
-    print(f"📡 Dhan API Order Response: {response}")
-    
-    return jsonify(response), 200
+    try:
+        if order_type_str == 'MARKET':
+            # TRUE MARKET: REMOVE PRICE ENTIRELY
+            response = dhan.place_order(
+                security_id=sec_id,
+                exchange_segment=exch_seg,
+                transaction_type=side_str,
+                quantity=int(data.get('quantity', 0)),
+                order_type='MARKET',
+                product_type='INTRA',
+                after_market_order=False 
+            )
+        else:
+            # LIMIT: SEND PRICE
+            response = dhan.place_order(
+                security_id=sec_id,
+                exchange_segment=exch_seg,
+                transaction_type=side_str,
+                quantity=int(data.get('quantity', 0)),
+                order_type='LIMIT',
+                product_type='INTRA',
+                price=float(data.get('price', 0)),
+                after_market_order=False 
+            )
+        
+        print(f"📡 Dhan API Order Response: {response}")
+        return jsonify(response), 200
+
+    except Exception as e:
+        print(f"❌ Order Execution Error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     # Listen on all public IPs on port 80 (standard HTTP port)
