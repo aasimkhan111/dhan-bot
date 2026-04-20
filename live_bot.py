@@ -22,32 +22,32 @@ SCRIP_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
 # Added low_memory=False to fix the DtypeWarning
 df = pd.read_csv(SCRIP_URL, low_memory=False)
 
-def get_security_id(symbol, price=0, option_type=None):
+def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
     try:
         symbol = symbol.upper()
         # --- DYNAMIC ATM/ITM LOGIC ---
         if "-ATM" in symbol or "-ITM" in symbol:
             base = symbol.split("-ATM")[0].split("-ITM")[0]
-            if price == 0:
-                print(f"❌ Error: price=0 received for {symbol} request.")
-                return None, None
             
-            # Calculate Strike (Step of 100 for BankNifty, 50 for Nifty)
-            step = 100 if "BANKNIFTY" in base else 50
-            strike = round(price / step) * step
-            
-            # Apply ITM Offset (100 points for BankNifty, 50 for Nifty)
-            if "-ITM" in symbol:
-                if option_type == 'CE':
-                    strike -= step
-                else: 
-                    strike += step
-                print(f"🎯 Calculating ITM for {base}: Price {price} -> Strike {strike}")
+            # Use manual strike if provided (for precise exits), else calculate from price
+            if manual_strike:
+                strike = float(manual_strike)
             else:
-                print(f"🎯 Calculating ATM for {base}: Price {price} -> Strike {strike}")
+                if price == 0:
+                    print(f"❌ Error: price=0 received for {symbol} request.")
+                    return None, None
+                # Calculate Strike (Step of 100 for BankNifty, 50 for Nifty)
+                step = 100 if "BANKNIFTY" in base else 50
+                strike = round(price / step) * step
+                
+                # Apply ITM Offset (100 points for BankNifty, 50 for Nifty)
+                if "-ITM" in symbol:
+                    if option_type == 'CE': strike -= step
+                    else: strike += step
+
+            print(f"🎯 Using {symbol} logic for {base}: Strike {strike}")
             
             # Find the option with this strike and nearest expiry
-            # Searching multiple columns to be safe: SM_SYMBOL_NAME, SEM_CUSTOM_SYMBOL, SEM_TRADING_SYMBOL
             match = df[(df['SEM_INSTRUMENT_NAME'] == 'OPTIDX') & 
                        (df['SEM_STRIKE_PRICE'].astype(float) == float(strike)) &
                        (df['SEM_OPTION_TYPE'] == option_type) &
@@ -56,13 +56,7 @@ def get_security_id(symbol, price=0, option_type=None):
                         (df['SEM_TRADING_SYMBOL'].str.contains(base, case=False, na=False)))]
             
             if match.empty:
-                print(f"⚠️ No exact strike {strike} found for {base}. Trying fuzzy search...")
-                # Fallback: search just by base and option type to see what we have
-                match = df[(df['SEM_INSTRUMENT_NAME'] == 'OPTIDX') & 
-                           (df['SEM_OPTION_TYPE'] == option_type) &
-                           (df['SEM_TRADING_SYMBOL'].str.contains(base, na=False))].head(5)
-                if not match.empty:
-                    print(f"💡 Found similar strikes: {match['SEM_STRIKE_PRICE'].tolist()}")
+                print(f"⚠️ No strike {strike} found for {base}.")
                 return None, None
             
         elif symbol.endswith('-I'):
@@ -95,30 +89,32 @@ def get_security_id(symbol, price=0, option_type=None):
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    # force=True ignores the Content-Type header which TradingView sometimes misses
     data = request.get_json(force=True, silent=True)
     
     if not data or data.get('secret') != SECRET_TOKEN:
-        print(f"🔴 403 ERROR! Data: {data}")
+        print(f"🔴 403 ERROR! Unauthorized request.")
         return jsonify({"error": "Unauthorized"}), 403
 
     symbol = data.get('symbol')
     price = float(data.get('price', 0))
     opt_type = data.get('option_type', 'CE')
+    manual_strike = data.get('itm_strike')
     
-    sec_id, inst_name = get_security_id(symbol, price, opt_type)
+    sec_id, inst_name = get_security_id(symbol, price, opt_type, manual_strike)
 
     if not sec_id:
         return jsonify({"error": f"Symbol {symbol} not found"}), 400
 
-    # Auto-detect if it's an Option/Future or Equity
+    # Auto-detect segment
     exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
 
-    order_type = data.get('order_type', 'MARKET')
-    dhan_order_type = dhan.MARKET if order_type.upper() == 'MARKET' else dhan.LIMIT
-    price = data.get('price', 0)
+    order_type = data.get('order_type', 'MARKET').upper()
+    dhan_order_type = dhan.MARKET if order_type == 'MARKET' else dhan.LIMIT
+    
+    # CRITICAL FIX: Set price to 0 for true Market orders to avoid "Limit" confusion in Dhan
+    final_price = 0.0 if order_type == 'MARKET' else float(data.get('price', 0))
 
-    # Placing the order LIVE
+    # Place order
     response = dhan.place_order(
         security_id=sec_id,
         exchange_segment=exch_seg,
@@ -126,7 +122,7 @@ def webhook():
         quantity=int(data['quantity']),
         order_type=dhan_order_type,
         product_type=dhan.INTRA,
-        price=float(price),
+        price=final_price,
         after_market_order=False 
     )
     
