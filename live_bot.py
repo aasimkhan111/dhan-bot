@@ -115,6 +115,8 @@ def webhook():
     final_price = 0.0 if order_type == 'MARKET' else float(data.get('price', 0))
 
     # Place order
+    print(f"🚀 PLACING {order_type} {data['side'].upper()} ORDER for {sec_id} | Price: {final_price} | Qty: {data['quantity']}")
+    
     response = dhan.place_order(
         security_id=sec_id,
         exchange_segment=exch_seg,
