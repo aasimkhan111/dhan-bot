@@ -109,20 +109,17 @@ def webhook():
     # Using library constants for maximum compatibility
     exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
 
-    # Handle Order Type and Price logic - CLEAN VERSION
+    # Handle Order Type and Price logic
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
+    transaction_type = dhan.BUY if side_str == 'BUY' else dhan.SELL
+    dhan_product_type = dhan.INTRA
     
     try:
-        # Determine parameters using Official Constants
-        dhan_transaction_type = dhan.BUY if side_str == 'BUY' else dhan.SELL
-        dhan_exch_seg = dhan.NSE_FNO if exch_seg == 2 else dhan.NSE
-        dhan_product_type = dhan.INTRA
-        
         if order_type_str == 'MARKET':
             dhan_order_type = dhan.MARKET
             final_price = 0.0
-            print(f"🔄 PLACING CLEAN MARKET ORDER for {sec_id}")
+            print(f"🔄 PLACING MARKET ORDER for {sec_id}")
         else:
             dhan_order_type = dhan.LIMIT
             final_price = float(data.get('price', 0))
@@ -131,9 +128,9 @@ def webhook():
         print(f"🚀 ATTEMPTING {side_str} ({order_type_str}) for {sec_id} | Price: {final_price} | Qty: {data.get('quantity')}")
         
         response = dhan.place_order(
-            security_id=str(sec_id),
-            exchange_segment=dhan_exch_seg,
-            transaction_type=dhan_transaction_type,
+            security_id=sec_id,
+            exchange_segment=exch_seg,
+            transaction_type=transaction_type,
             quantity=int(data.get('quantity', 0)),
             order_type=dhan_order_type,
             product_type=dhan_product_type,
