@@ -119,8 +119,21 @@ def webhook():
         if order_type_str == 'MARKET':
             # 1. Fetch Actual LTP to make the order "Precise"
             print(f"🔍 Fetching current LTP for {sec_id}...")
-            quote = dhan.quote_data([str(sec_id)])
-            ltp = float(quote['data'][0]['lastPrice']) if quote.get('data') else 0.0
+            try:
+                # Try getting quote with explicit segment
+                quote = dhan.quote_data([{"sec_id": str(sec_id), "exch_seg": "NSE_FNO" if exch_seg == 2 else "NSE"}])
+                print(f"📊 Raw Quote Response: {quote}")
+                
+                # Robust extraction
+                if isinstance(quote, dict) and 'data' in quote:
+                    ltp = float(quote['data'][0]['lastPrice'])
+                elif isinstance(quote, list) and len(quote) > 0:
+                    ltp = float(quote[0].get('lastPrice', 0))
+                else:
+                    ltp = 0.0
+            except Exception as e:
+                print(f"⚠️ LTP Fetch Failed: {str(e)}")
+                ltp = 0.0
             
             if ltp > 0:
                 # 2. Add a tiny 1% buffer (Professional Marketable Limit)
