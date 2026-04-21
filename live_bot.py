@@ -109,34 +109,37 @@ def webhook():
     # Using library constants for maximum compatibility
     exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
 
-    # Handle Order Type and Price logic
+    # Handle Order Type and Price logic - YOUTUBE STYLE
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
-    transaction_type = dhan.BUY if side_str == 'BUY' else dhan.SELL
-    dhan_product_type = dhan.INTRA
-
+    
+    # exch_seg: 2 for NFO, 1 for NSE
+    # product_type: 'MARGIN' shows as 'Normal', 'INTRA' shows as 'Intraday'
+    
     try:
         if order_type_str == 'MARKET':
-            dhan_order_type = dhan.MARKET
-            final_price = 0.0 # Dhan requires 0 for true market orders
-            print(f"🔄 PLACING TRUE MARKET ORDER for {sec_id}")
+            print(f"🔄 PLACING YOUTUBE STYLE MARKET ORDER for {sec_id}")
+            response = dhan.place_order(
+                security_id=str(sec_id),
+                exchange_segment='NSE_FNO' if exch_seg == 2 else 'NSE',
+                transaction_type=side_str,
+                quantity=int(data.get('quantity', 0)),
+                order_type='MARKET',
+                product_type='MARGIN', # This is 'Normal'
+                price=0,
+                after_market_order=False 
+            )
         else:
-            dhan_order_type = dhan.LIMIT
-            final_price = float(data.get('price', 0))
-
-        # Place order
-        print(f"🚀 ATTEMPTING {side_str} ({order_type_str}) for {sec_id} | Price: {final_price} | Qty: {data.get('quantity')}")
-        
-        response = dhan.place_order(
-            security_id=sec_id,
-            exchange_segment=exch_seg,
-            transaction_type=transaction_type,
-            quantity=int(data.get('quantity', 0)),
-            order_type=dhan_order_type,
-            product_type=dhan_product_type,
-            price=final_price,
-            after_market_order=False 
-        )
+            response = dhan.place_order(
+                security_id=str(sec_id),
+                exchange_segment='NSE_FNO' if exch_seg == 2 else 'NSE',
+                transaction_type=side_str,
+                quantity=int(data.get('quantity', 0)),
+                order_type='LIMIT',
+                product_type='MARGIN',
+                price=float(data.get('price', 0)),
+                after_market_order=False 
+            )
         
         print(f"📡 Dhan API Order Response: {response}")
         return jsonify(response), 200
