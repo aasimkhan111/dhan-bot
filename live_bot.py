@@ -71,14 +71,20 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
                 match = df[(df['SEM_CUSTOM_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
 
         if not match.empty:
-            # Sort by expiry to get the nearest one
+            # Sort by expiry to get the nearest one safely
+            match = match.copy()
             if 'SEM_EXPIRY_DATE' in match.columns:
-                match = match.sort_values('SEM_EXPIRY_DATE')
+                match['expiry_dt'] = pd.to_datetime(match['SEM_EXPIRY_DATE'], errors='coerce')
+                match = match.dropna(subset=['expiry_dt']).sort_values('expiry_dt')
             
-            sec_id = str(match.iloc[0]['SEM_SMST_SECURITY_ID'])
-            inst_name = str(match.iloc[0]['SEM_INSTRUMENT_NAME'])
-            final_symbol = str(match.iloc[0]['SEM_TRADING_SYMBOL'])
-            print(f"✅ Found: {final_symbol} | ID: {sec_id}")
+            # Use the first active match
+            row = match.iloc[0]
+            sec_id = int(row['SEM_SMST_SECURITY_ID'])
+            inst_name = str(row['SEM_INSTRUMENT_NAME'])
+            final_symbol = str(row['SEM_TRADING_SYMBOL'])
+            expiry = str(row['SEM_EXPIRY_DATE'])
+            
+            print(f"✅ Found: {final_symbol} | ID: {sec_id} | Expiry: {expiry}")
             return sec_id, inst_name
         else:
             print(f"❌ Symbol {symbol} not found.")
