@@ -109,17 +109,32 @@ def webhook():
     # Using library constants for maximum compatibility
     exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
 
-    # Handle Order Type and Price logic - STABLE FINAL VERSION
+    # Handle Order Type and Price logic - PRECISE BUY VERSION
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
     transaction_type = dhan.BUY if side_str == 'BUY' else dhan.SELL
     dhan_product_type = dhan.INTRA
     
     try:
-        final_price = 0.0
-        dhan_order_type = dhan.MARKET
-        
-        if order_type_str != 'MARKET':
+        if order_type_str == 'MARKET':
+            # 1. Fetch Actual LTP to make the order "Precise"
+            print(f"🔍 Fetching current LTP for {sec_id}...")
+            quote = dhan.get_quote_data([str(sec_id)])
+            ltp = float(quote['data'][0]['lastPrice']) if quote.get('data') else 0.0
+            
+            if ltp > 0:
+                # 2. Add a tiny 1% buffer (Professional Marketable Limit)
+                if side_str == 'BUY':
+                    final_price = round(ltp * 1.01, 1) # 1% higher
+                else:
+                    final_price = round(ltp * 0.99, 1) # 1% lower
+                dhan_order_type = dhan.LIMIT # This makes it work 100% stable
+                print(f"🎯 Precise Price calculated: {final_price} (LTP was {ltp})")
+            else:
+                # Fallback to old Market if LTP fetch fails
+                dhan_order_type = dhan.MARKET
+                final_price = 0.0
+        else:
             dhan_order_type = dhan.LIMIT
             final_price = float(data.get('price', 0))
 
