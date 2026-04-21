@@ -119,7 +119,7 @@ def webhook():
         if order_type_str == 'MARKET':
             # 1. Fetch Actual LTP to make the order "Precise"
             print(f"🔍 Fetching current LTP for {sec_id}...")
-            quote = dhan.get_quote_data([str(sec_id)])
+            quote = dhan.quote_data([str(sec_id)])
             ltp = float(quote['data'][0]['lastPrice']) if quote.get('data') else 0.0
             
             if ltp > 0:
