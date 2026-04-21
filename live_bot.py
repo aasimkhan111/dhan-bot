@@ -109,31 +109,30 @@ def webhook():
     # Using library constants for maximum compatibility
     exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
 
-    # Handle Order Type and Price logic - FINAL STABLE VERSION
+    # Handle Order Type and Price logic - LEGACY STYLE ATTEMPT
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
-    transaction_type = dhan.BUY if side_str == 'BUY' else dhan.SELL
-    dhan_product_type = dhan.INTRA
+    transaction_type = side_str # Using raw string 'BUY'/'SELL'
     
     try:
         if order_type_str == 'MARKET':
-            dhan_order_type = dhan.MARKET
-            final_price = 0.0
-            print(f"🔄 PLACING MARKET ORDER for {sec_id}")
+            dhan_order_type = 'MARKET' # String instead of constant
+            final_price = 0 # Integer instead of 0.0
+            print(f"🔄 FORCING LEGACY MARKET ORDER for {sec_id}")
         else:
-            dhan_order_type = dhan.LIMIT
+            dhan_order_type = 'LIMIT'
             final_price = float(data.get('price', 0))
 
         # Place order
-        print(f"🚀 ATTEMPTING {side_str} ({order_type_str}) for {sec_id} | Qty: {data.get('quantity')}")
+        print(f"🚀 SENDING TO DHAN: SecID={sec_id}, Type={dhan_order_type}, Price={final_price}, Qty={data.get('quantity')}")
         
         response = dhan.place_order(
-            security_id=sec_id,
-            exchange_segment=exch_seg,
+            security_id=str(sec_id),
+            exchange_segment='NSE_FNO' if exch_seg == 2 else 'NSE',
             transaction_type=transaction_type,
             quantity=int(data.get('quantity', 0)),
             order_type=dhan_order_type,
-            product_type=dhan_product_type,
+            product_type='INTRA',
             price=final_price,
             after_market_order=False 
         )
