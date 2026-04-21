@@ -109,30 +109,49 @@ def webhook():
     # Using library constants for maximum compatibility
     exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
 
-    # Handle Order Type and Price logic - LEGACY STYLE ATTEMPT
+    # Handle Order Type and Price logic - TRUE LIMIT AT LTP VERSION
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
-    transaction_type = side_str # Using raw string 'BUY'/'SELL'
     
     try:
+        # 1. ALWAYS Try to get LTP for Market orders to make them "True Limit"
         if order_type_str == 'MARKET':
-            dhan_order_type = 'MARKET' # String instead of constant
-            final_price = 0 # Integer instead of 0.0
-            print(f"🔄 FORCING LEGACY MARKET ORDER for {sec_id}")
+            print(f"🔍 Fetching True LTP for {sec_id}...")
+            try:
+                # Use simple list of strings - Dhan library handles parsing
+                quote = dhan.quote_data([str(sec_id)])
+                print(f"📊 Market Quote: {quote}")
+                
+                # Robust extraction based on known Dhan response formats
+                if isinstance(quote, dict) and 'data' in quote and len(quote['data']) > 0:
+                    ltp = float(quote['data'][0]['lastPrice'])
+                elif isinstance(quote, list) and len(quote) > 0:
+                    ltp = float(quote[0].get('lastPrice', 0))
+                else:
+                    ltp = 0.0
+            except:
+                ltp = 0.0
+            
+            if ltp > 0:
+                final_price = ltp
+                dhan_order_type = dhan.LIMIT
+                print(f"🎯 Placing TRUE LIMIT order at LTP: {final_price}")
+            else:
+                # Emergency fallback to standard Market
+                dhan_order_type = dhan.MARKET
+                final_price = 0.0
         else:
-            dhan_order_type = 'LIMIT'
+            dhan_order_type = dhan.LIMIT
             final_price = float(data.get('price', 0))
 
-        # Place order
-        print(f"🚀 SENDING TO DHAN: SecID={sec_id}, Type={dhan_order_type}, Price={final_price}, Qty={data.get('quantity')}")
-        
+        # Place order using official constants
         response = dhan.place_order(
             security_id=str(sec_id),
-            exchange_segment='NSE_FNO' if exch_seg == 2 else 'NSE',
-            transaction_type=transaction_type,
+            exchange_segment=dhan.NSE_FNO if exch_seg == 2 else dhan.NSE,
+            transaction_type=dhan.BUY if side_str == 'BUY' else dhan.SELL,
             quantity=int(data.get('quantity', 0)),
             order_type=dhan_order_type,
-            product_type='INTRA',
+            product_type=dhan.INTRA,
             price=final_price,
             after_market_order=False 
         )
