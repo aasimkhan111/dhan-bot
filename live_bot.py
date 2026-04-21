@@ -83,9 +83,11 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
             inst_name = str(row['SEM_INSTRUMENT_NAME'])
             final_symbol = str(row['SEM_TRADING_SYMBOL'])
             expiry = str(row['SEM_EXPIRY_DATE'])
+            # Get the actual exchange ID from the master list
+            exch_seg_id = row.get('SEM_EXM_EXCH_ID', 'NSE') 
             
-            print(f"✅ Found: {final_symbol} | ID: {sec_id} | Expiry: {expiry}")
-            return sec_id, inst_name
+            print(f"✅ Found: {final_symbol} | ID: {sec_id} | Expiry: {expiry} | Seg: {exch_seg_id}")
+            return sec_id, exch_seg_id
         else:
             print(f"❌ Symbol {symbol} not found.")
             return None, None
@@ -99,40 +101,36 @@ def webhook():
     
     if not data or data.get('secret') != SECRET_TOKEN:
         print(f"🔴 403 ERROR! Unauthorized request.")
-        return jsonify({"error": "Unauthorized"}), 403
+        return jsonify({"status": "error", "remarks": "Unauthorized"}), 403
 
     symbol = data.get('symbol')
     price = float(data.get('price', 0))
-    opt_type = data.get('option_type', 'CE')
+    option_type = data.get('option_type', 'CE').upper()
     manual_strike = data.get('itm_strike')
+
+    # 1. Resolve exact Security ID and Segment from Master List
+    sec_id, exch_seg = get_security_id(symbol, price, option_type, manual_strike)
     
-    sec_id, inst_name = get_security_id(symbol, price, opt_type, manual_strike)
-
     if not sec_id:
-        return jsonify({"error": f"Symbol {symbol} not found"}), 400
+        return jsonify({"status": "error", "remarks": "Symbol not found"}), 400
 
-    # Auto-detect segment
-    # Using library constants for maximum compatibility
-    exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
-
-    # Handle Order Type and Price logic - SAFE MARKET VERSION
+    # Handle Order Type and Price logic
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
     
     try:
-        # Standard Market Order to avoid rate limits
         if order_type_str == 'MARKET':
             dhan_order_type = dhan.MARKET
             final_price = 0.0
-            print(f"🔄 PLACING SAFE MARKET ORDER for {sec_id}")
+            print(f"🔄 PLACING MARKET ORDER for {sec_id} on {exch_seg}")
         else:
             dhan_order_type = dhan.LIMIT
             final_price = float(data.get('price', 0))
 
-        # Place order using strictly verified params
+        # Place order using Literal Data
         response = dhan.place_order(
-            security_id=int(sec_id), # Ensure Integer
-            exchange_segment=dhan.NSE_FNO if exch_seg == 2 else dhan.NSE,
+            security_id=str(sec_id),
+            exchange_segment=exch_seg,
             transaction_type=dhan.BUY if side_str == 'BUY' else dhan.SELL,
             quantity=int(data.get('quantity', 0)),
             order_type=dhan_order_type,
