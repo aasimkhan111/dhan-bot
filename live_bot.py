@@ -83,11 +83,9 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
             inst_name = str(row['SEM_INSTRUMENT_NAME'])
             final_symbol = str(row['SEM_TRADING_SYMBOL'])
             expiry = str(row['SEM_EXPIRY_DATE'])
-            # Get the actual exchange ID from the master list
-            exch_seg_id = row.get('SEM_EXM_EXCH_ID', 'NSE') 
             
-            print(f"✅ Found: {final_symbol} | ID: {sec_id} | Expiry: {expiry} | Seg: {exch_seg_id}")
-            return sec_id, exch_seg_id
+            print(f"✅ Found: {final_symbol} | ID: {sec_id} | Expiry: {expiry}")
+            return sec_id, inst_name
         else:
             print(f"❌ Symbol {symbol} not found.")
             return None, None
@@ -108,11 +106,17 @@ def webhook():
     option_type = data.get('option_type', 'CE').upper()
     manual_strike = data.get('itm_strike')
 
-    # 1. Resolve exact Security ID and Segment from Master List
-    sec_id, exch_seg = get_security_id(symbol, price, option_type, manual_strike)
+    # 1. Resolve exact Security ID and Instrument Type
+    sec_id, inst_name = get_security_id(symbol, price, option_type, manual_strike)
     
     if not sec_id:
         return jsonify({"status": "error", "remarks": "Symbol not found"}), 400
+
+    # 2. FORCE CORRECT SEGMENT (The Permanent Fix)
+    if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK']:
+        exch_seg = dhan.NSE_FNO
+    else:
+        exch_seg = dhan.NSE
 
     # Handle Order Type and Price logic
     order_type_str = data.get('order_type', 'MARKET').upper()
@@ -122,14 +126,14 @@ def webhook():
         if order_type_str == 'MARKET':
             dhan_order_type = dhan.MARKET
             final_price = 0.0
-            print(f"🔄 PLACING MARKET ORDER for {sec_id} on {exch_seg}")
+            print(f"🔄 PLACING MARKET ORDER for {sec_id}")
         else:
             dhan_order_type = dhan.LIMIT
             final_price = float(data.get('price', 0))
 
-        # Place order using Literal Data
+        # Place order using strictly verified params
         response = dhan.place_order(
-            security_id=str(sec_id),
+            security_id=int(sec_id), # Pure Integer
             exchange_segment=exch_seg,
             transaction_type=dhan.BUY if side_str == 'BUY' else dhan.SELL,
             quantity=int(data.get('quantity', 0)),
