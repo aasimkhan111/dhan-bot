@@ -109,7 +109,7 @@ def webhook():
     # Using library constants for maximum compatibility
     exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
 
-    # Handle Order Type and Price logic - PRECISE BUY VERSION
+    # Handle Order Type and Price logic - FINAL STABLE VERSION
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
     transaction_type = dhan.BUY if side_str == 'BUY' else dhan.SELL
@@ -117,42 +117,15 @@ def webhook():
     
     try:
         if order_type_str == 'MARKET':
-            # 1. Fetch Actual LTP to make the order "Precise"
-            print(f"🔍 Fetching current LTP for {sec_id}...")
-            try:
-                # Try getting quote with explicit segment
-                quote = dhan.quote_data([{"sec_id": str(sec_id), "exch_seg": "NSE_FNO" if exch_seg == 2 else "NSE"}])
-                print(f"📊 Raw Quote Response: {quote}")
-                
-                # Robust extraction
-                if isinstance(quote, dict) and 'data' in quote:
-                    ltp = float(quote['data'][0]['lastPrice'])
-                elif isinstance(quote, list) and len(quote) > 0:
-                    ltp = float(quote[0].get('lastPrice', 0))
-                else:
-                    ltp = 0.0
-            except Exception as e:
-                print(f"⚠️ LTP Fetch Failed: {str(e)}")
-                ltp = 0.0
-            
-            if ltp > 0:
-                # 2. Add a tiny 1% buffer (Professional Marketable Limit)
-                if side_str == 'BUY':
-                    final_price = round(ltp * 1.01, 1) # 1% higher
-                else:
-                    final_price = round(ltp * 0.99, 1) # 1% lower
-                dhan_order_type = dhan.LIMIT # This makes it work 100% stable
-                print(f"🎯 Precise Price calculated: {final_price} (LTP was {ltp})")
-            else:
-                # Fallback to old Market if LTP fetch fails
-                dhan_order_type = dhan.MARKET
-                final_price = 0.0
+            dhan_order_type = dhan.MARKET
+            final_price = 0.0
+            print(f"🔄 PLACING MARKET ORDER for {sec_id}")
         else:
             dhan_order_type = dhan.LIMIT
             final_price = float(data.get('price', 0))
 
         # Place order
-        print(f"🚀 ATTEMPTING {side_str} ({order_type_str}) for {sec_id} | Price: {final_price} | Qty: {data.get('quantity')}")
+        print(f"🚀 ATTEMPTING {side_str} ({order_type_str}) for {sec_id} | Qty: {data.get('quantity')}")
         
         response = dhan.place_order(
             security_id=sec_id,
