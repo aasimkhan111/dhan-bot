@@ -109,22 +109,37 @@ def webhook():
     # Using library constants for maximum compatibility
     exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
 
+    # Handle Order Type and Price logic for NFO (Marketable Limit)
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
     transaction_type = dhan.BUY if side_str == 'BUY' else dhan.SELL
-    dhan_product_type = dhan.INTRA # Default to Intraday
-
-    # Place order - RESTORED CONSTANTS MODE
-    print(f"🚀 ATTEMPTING {order_type_str} {side_str} ORDER for {sec_id} | Qty: {data.get('quantity')}")
+    dhan_product_type = dhan.INTRA
     
+    # Base price from TradingView (Close price)
+    base_price = float(data.get('price', 0))
+
     try:
-        final_price = 0.0
+        final_price = base_price
         dhan_order_type = dhan.MARKET
         
-        if order_type_str != 'MARKET':
+        # --- MARKETABLE LIMIT LOGIC FOR NFO ---
+        # Brokers often block true "MARKET" orders for Options.
+        # We use a 5% buffer to force instant execution.
+        if order_type_str == 'MARKET' and exch_seg == 2:
             dhan_order_type = dhan.LIMIT
-            final_price = float(data.get('price', 0))
+            if side_str == 'BUY':
+                final_price = math.floor(base_price * 1.05) # 5% higher
+            else:
+                final_price = math.ceil(base_price * 0.95)  # 5% lower
+            print(f"🔄 NFO Market Order converted to Marketable Limit: {base_price} -> {final_price}")
+        
+        elif order_type_str == 'LIMIT':
+            dhan_order_type = dhan.LIMIT
+            final_price = base_price
 
+        # Place order
+        print(f"🚀 ATTEMPTING {side_str} ({dhan_order_type}) for {sec_id} | Price: {final_price} | Qty: {data.get('quantity')}")
+        
         response = dhan.place_order(
             security_id=sec_id,
             exchange_segment=exch_seg,
@@ -132,7 +147,7 @@ def webhook():
             quantity=int(data.get('quantity', 0)),
             order_type=dhan_order_type,
             product_type=dhan_product_type,
-            price=final_price,
+            price=float(final_price),
             after_market_order=False 
         )
         
