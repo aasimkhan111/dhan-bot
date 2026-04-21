@@ -115,39 +115,23 @@ def webhook():
     # Using library constants for maximum compatibility
     exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
 
-    # Handle Order Type and Price logic - ROBUST LTP VERSION
+    # Handle Order Type and Price logic - SAFE MARKET VERSION
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
     
     try:
-        # 1. Fetch LTP for Market orders
+        # Standard Market Order to avoid rate limits
         if order_type_str == 'MARKET':
-            print(f"🔍 Fetching Robust LTP for {sec_id}...")
-            try:
-                # Some versions of dhanhq expect a dictionary, some a list. We try the dictionary approach here.
-                quote = dhan.quote_data({"instrument_list": [{"sec_id": str(sec_id), "exch_seg": "NSE_FNO" if exch_seg == 2 else "NSE"}]})
-                print(f"📊 Market Quote (Dict Style): {quote}")
-                
-                if isinstance(quote, dict) and 'data' in quote and len(quote['data']) > 0:
-                    ltp = float(quote['data'][0]['lastPrice'])
-                else:
-                    ltp = 0.0
-            except:
-                ltp = 0.0
-            
-            if ltp > 0:
-                final_price = ltp
-                dhan_order_type = dhan.LIMIT
-            else:
-                dhan_order_type = dhan.MARKET
-                final_price = 0.0
+            dhan_order_type = dhan.MARKET
+            final_price = 0.0
+            print(f"🔄 PLACING SAFE MARKET ORDER for {sec_id}")
         else:
             dhan_order_type = dhan.LIMIT
             final_price = float(data.get('price', 0))
 
-        # Place order
+        # Place order using strictly verified params
         response = dhan.place_order(
-            security_id=str(sec_id),
+            security_id=int(sec_id), # Ensure Integer
             exchange_segment=dhan.NSE_FNO if exch_seg == 2 else dhan.NSE,
             transaction_type=dhan.BUY if side_str == 'BUY' else dhan.SELL,
             quantity=int(data.get('quantity', 0)),
