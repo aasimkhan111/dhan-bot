@@ -109,24 +109,21 @@ def webhook():
     # Using library constants for maximum compatibility
     exch_seg = dhan.NSE_FNO if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK'] else dhan.NSE
 
-    # Handle Order Type and Price logic - TRUE LIMIT AT LTP VERSION
+    # Handle Order Type and Price logic - ROBUST LTP VERSION
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
     
     try:
-        # 1. ALWAYS Try to get LTP for Market orders to make them "True Limit"
+        # 1. Fetch LTP for Market orders
         if order_type_str == 'MARKET':
-            print(f"🔍 Fetching True LTP for {sec_id}...")
+            print(f"🔍 Fetching Robust LTP for {sec_id}...")
             try:
-                # Use simple list of strings - Dhan library handles parsing
-                quote = dhan.quote_data([str(sec_id)])
-                print(f"📊 Market Quote: {quote}")
+                # Some versions of dhanhq expect a dictionary, some a list. We try the dictionary approach here.
+                quote = dhan.quote_data({"instrument_list": [{"sec_id": str(sec_id), "exch_seg": "NSE_FNO" if exch_seg == 2 else "NSE"}]})
+                print(f"📊 Market Quote (Dict Style): {quote}")
                 
-                # Robust extraction based on known Dhan response formats
                 if isinstance(quote, dict) and 'data' in quote and len(quote['data']) > 0:
                     ltp = float(quote['data'][0]['lastPrice'])
-                elif isinstance(quote, list) and len(quote) > 0:
-                    ltp = float(quote[0].get('lastPrice', 0))
                 else:
                     ltp = 0.0
             except:
@@ -135,16 +132,14 @@ def webhook():
             if ltp > 0:
                 final_price = ltp
                 dhan_order_type = dhan.LIMIT
-                print(f"🎯 Placing TRUE LIMIT order at LTP: {final_price}")
             else:
-                # Emergency fallback to standard Market
                 dhan_order_type = dhan.MARKET
                 final_price = 0.0
         else:
             dhan_order_type = dhan.LIMIT
             final_price = float(data.get('price', 0))
 
-        # Place order using official constants
+        # Place order
         response = dhan.place_order(
             security_id=str(sec_id),
             exchange_segment=dhan.NSE_FNO if exch_seg == 2 else dhan.NSE,
@@ -152,7 +147,7 @@ def webhook():
             quantity=int(data.get('quantity', 0)),
             order_type=dhan_order_type,
             product_type=dhan.INTRA,
-            price=final_price,
+            price=float(final_price),
             after_market_order=False 
         )
         
