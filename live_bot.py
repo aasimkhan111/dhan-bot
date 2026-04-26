@@ -118,22 +118,37 @@ def webhook():
     else:
         exch_seg = dhan.NSE
 
-    # Handle Order Type and Price logic
+    # Handle Order Type and Price logic - PRECISE LTP VERSION
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
     
     try:
+        final_price = 0.0
+        dhan_order_type = dhan.MARKET
+
+        # If it's a Market order, we try to fetch LTP to make it a "Precise Limit"
         if order_type_str == 'MARKET':
-            dhan_order_type = dhan.MARKET
-            final_price = 0.0
-            print(f"🔄 PLACING MARKET ORDER for {sec_id}")
-        else:
+            print(f"🔍 Fetching Precise LTP for {sec_id}...")
+            try:
+                # Get the real-time quote
+                quote = dhan.quote_data({"instrument_list": [{"sec_id": str(sec_id), "exch_seg": "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE"}]})
+                if quote.get('status') == 'success' and 'data' in quote:
+                    ltp = float(quote['data'][0]['lastPrice'])
+                    if ltp > 0:
+                        final_price = ltp
+                        dhan_order_type = dhan.LIMIT
+                        print(f"🎯 Precise LTP Found: {final_price}. Placing LIMIT order.")
+            except Exception as e:
+                print(f"⚠️ LTP Fetch Failed, falling back to Market: {e}")
+
+        # If it was originally a Limit order from TV, use that price
+        if order_type_str == 'LIMIT':
             dhan_order_type = dhan.LIMIT
             final_price = float(data.get('price', 0))
 
-        # Place order using strictly verified params
+        # Place order
         response = dhan.place_order(
-            security_id=int(sec_id), # Pure Integer
+            security_id=int(sec_id),
             exchange_segment=exch_seg,
             transaction_type=dhan.BUY if side_str == 'BUY' else dhan.SELL,
             quantity=int(data.get('quantity', 0)),
