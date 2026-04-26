@@ -126,29 +126,36 @@ def webhook():
         final_price = 0.0
         dhan_order_type = dhan.MARKET
 
-        # If it's a Market order, we try to fetch LTP to make it a "Precise Limit"
+        # 1. Fetch LTP for Market orders to solve the "Gap" problem
         if order_type_str == 'MARKET':
             print(f"🔍 Fetching Precise LTP for {sec_id}...")
             try:
-                # Get the real-time quote
-                quote = dhan.quote_data({"instrument_list": [{"sec_id": str(sec_id), "exch_seg": "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE"}]})
-                if quote.get('status') == 'success' and 'data' in quote:
-                    ltp = float(quote['data'][0]['lastPrice'])
-                    if ltp > 0:
-                        final_price = ltp
-                        dhan_order_type = dhan.LIMIT
-                        print(f"🎯 Precise LTP Found: {final_price}. Placing LIMIT order.")
+                # Correct dictionary format for the latest Dhan API
+                quote = dhan.quote_data({
+                    "instrument_list": [{"sec_id": str(sec_id), "exch_seg": "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE"}]
+                })
+                
+                # Extract lastPrice safely
+                if isinstance(quote, dict) and quote.get('status') == 'success':
+                    data_list = quote.get('data', [])
+                    if isinstance(data_list, list) and len(data_list) > 0:
+                        ltp = float(data_list[0].get('lastPrice', 0))
+                        if ltp > 0:
+                            final_price = ltp
+                            dhan_order_type = dhan.LIMIT
+                            print(f"🎯 LTP Found: {final_price}. Placing Precise LIMIT order.")
+                
+                if final_price == 0:
+                    print("⚠️ LTP Fetch failed or zero. Falling back to Standard Market Order.")
             except Exception as e:
-                print(f"⚠️ LTP Fetch Failed, falling back to Market: {e}")
-
-        # If it was originally a Limit order from TV, use that price
-        if order_type_str == 'LIMIT':
+                print(f"⚠️ LTP Fetch Error: {e}. Falling back to Standard Market Order.")
+        else:
             dhan_order_type = dhan.LIMIT
             final_price = float(data.get('price', 0))
 
-        # Place order
+        # 2. Place order using strictly verified params
         response = dhan.place_order(
-            security_id=int(sec_id),
+            security_id=int(sec_id), # Pure Integer
             exchange_segment=exch_seg,
             transaction_type=dhan.BUY if side_str == 'BUY' else dhan.SELL,
             quantity=int(data.get('quantity', 0)),
