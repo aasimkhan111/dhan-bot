@@ -10,8 +10,8 @@ CLIENT_ID = "1100819221"
 ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc3MzQ3MDA5LCJpYXQiOjE3NzcyNjA2MDksInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAwODE5MjIxIn0.lfo3PnpGRvHJky_F2VdlPXy-uyziLZWhxH4BBv1ObCGx6wx0Ojl2dappmWTjRkp2ybNHLxsAEU6MFez3ApErVw"
 SECRET_TOKEN = "JunnarTrader2026"
 
-# Connect to the Live Trading System (Version 2.2.0 - Only Token Required)
-dhan = dhanhq(access_token=ACCESS_TOKEN)
+# Connect to the Live Trading System (Version 2.2.0 - Positional Token)
+dhan = dhanhq(ACCESS_TOKEN)
 
 # Notice here that we REMOVED the `dhan.base_url = ...` line!
 # The default library URL points directly to the live environment.
