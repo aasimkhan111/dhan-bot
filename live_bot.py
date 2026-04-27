@@ -130,24 +130,28 @@ def webhook():
         if order_type_str == 'MARKET':
             print(f"🔍 Fetching Precise LTP for {sec_id}...")
             try:
-                # Correct dictionary format for the latest Dhan API
-                quote = dhan.quote_data({
-                    "instrument_list": [{"sec_id": str(sec_id), "exch_seg": "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE"}]
-                })
+                # Using get_ltp_data which is often more reliable for single scrips
+                quote = dhan.get_ltp_data(
+                    str(sec_id), 
+                    "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE",
+                    "OPTIDX" if inst_name == 'OPTIDX' else "EQUITY"
+                )
                 
-                # Extract lastPrice safely
-                print(f"📊 Raw Quote Response: {quote}")
+                print(f"📊 Raw LTP Response: {quote}")
+                
+                # Robust extraction
                 if isinstance(quote, dict) and quote.get('status') == 'success':
-                    data_list = quote.get('data', [])
-                    if isinstance(data_list, list) and len(data_list) > 0:
-                        ltp = float(data_list[0].get('lastPrice', 0))
-                        if ltp > 0:
-                            final_price = ltp
-                            dhan_order_type = dhan.LIMIT
-                            print(f"🎯 LTP Found: {final_price}. Placing Precise LIMIT order.")
+                    data_body = quote.get('data', {})
+                    # The response for get_ltp_data is usually {'status': 'success', 'data': {'lastPrice': 123.45}}
+                    ltp = float(data_body.get('lastPrice', 0))
+                    
+                    if ltp > 0:
+                        final_price = ltp
+                        dhan_order_type = dhan.LIMIT
+                        print(f"🎯 LTP Found: {final_price}. Placing Precise LIMIT order.")
                 
                 if final_price == 0:
-                    print(f"⚠️ LTP Fetch failed or zero. Raw Data: {quote}")
+                    print(f"⚠️ LTP Fetch failed or zero. Data: {quote}")
                     print("⚠️ Falling back to Standard Market Order.")
             except Exception as e:
                 print(f"⚠️ LTP Fetch Error: {e}. Falling back to Standard Market Order.")
