@@ -138,13 +138,15 @@ def webhook():
                 quote = dhan.ticker_data(securities)
                 print(f"📊 Raw Ticker Response: {quote}")
                 
-                # Extracting LTP from Version 2.2.0 structure
+                # Extracting LTP from Version 2.2.0 structure (Exact Match to Logs)
                 if isinstance(quote, dict) and quote.get('status') == 'success':
-                    data_body = quote.get('data', {})
-                    # Structure is usually data[seg][id]['lp'] or similar
-                    seg_data = data_body.get(seg_key, {})
+                    outer_data = quote.get('data', {})
+                    inner_data = outer_data.get('data', {}) # Logs show nested 'data'
+                    seg_data = inner_data.get(seg_key, {})
                     id_data = seg_data.get(str(sec_id), {})
-                    ltp = float(id_data.get('lp', 0))
+                    
+                    # Log shows 'last_price'
+                    ltp = float(id_data.get('last_price', 0))
                     
                     if ltp > 0:
                         final_price = ltp
