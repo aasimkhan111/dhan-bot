@@ -130,20 +130,19 @@ def webhook():
         if order_type_str == 'MARKET':
             print(f"🔍 Fetching Precise LTP for {sec_id}...")
             try:
-                # Using ohlc_data which is universally available in all dhanhq versions
-                quote = dhan.ohlc_data(
+                # Using get_ltp_data (Requires dhanhq version 1.3.1+)
+                quote = dhan.get_ltp_data(
                     str(sec_id), 
                     "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE",
-                    inst_name
+                    "OPTIDX" if inst_name == 'OPTIDX' else "EQUITY"
                 )
                 
-                print(f"📊 Raw OHLC Response: {quote}")
+                print(f"📊 Raw LTP Response: {quote}")
                 
-                # Robust extraction from OHLC format
+                # Robust extraction
                 if isinstance(quote, dict) and quote.get('status') == 'success':
                     data_body = quote.get('data', {})
-                    # OHLC data usually contains 'last_price' or 'lp'
-                    ltp = float(data_body.get('last_price', data_body.get('lp', 0)))
+                    ltp = float(data_body.get('lastPrice', 0))
                     
                     if ltp > 0:
                         final_price = ltp
