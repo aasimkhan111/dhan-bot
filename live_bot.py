@@ -127,23 +127,24 @@ def webhook():
         final_price = 0.0
         dhan_order_type = dhan.MARKET
 
-        # 1. Fetch LTP for Market orders to solve the "Gap" problem
+        # 1. Fetch LTP for Market orders - VERSION 2.2.0 TICKER PATTERN
         if order_type_str == 'MARKET':
             print(f"🔍 Fetching Precise LTP for {sec_id}...")
             try:
-                # Using get_ltp_data (Requires dhanhq version 1.3.1+)
-                quote = dhan.get_ltp_data(
-                    str(sec_id), 
-                    "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE",
-                    "OPTIDX" if inst_name == 'OPTIDX' else "EQUITY"
-                )
+                # Version 2.2.0 requires a dictionary of lists
+                seg_key = "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE"
+                securities = {seg_key: [int(sec_id)]}
                 
-                print(f"📊 Raw LTP Response: {quote}")
+                quote = dhan.ticker_data(securities)
+                print(f"📊 Raw Ticker Response: {quote}")
                 
-                # Robust extraction
+                # Extracting LTP from Version 2.2.0 structure
                 if isinstance(quote, dict) and quote.get('status') == 'success':
                     data_body = quote.get('data', {})
-                    ltp = float(data_body.get('lastPrice', 0))
+                    # Structure is usually data[seg][id]['lp'] or similar
+                    seg_data = data_body.get(seg_key, {})
+                    id_data = seg_data.get(str(sec_id), {})
+                    ltp = float(id_data.get('lp', 0))
                     
                     if ltp > 0:
                         final_price = ltp
