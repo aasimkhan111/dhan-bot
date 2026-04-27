@@ -136,6 +136,7 @@ def webhook():
                 })
                 
                 # Extract lastPrice safely
+                print(f"📊 Raw Quote Response: {quote}")
                 if isinstance(quote, dict) and quote.get('status') == 'success':
                     data_list = quote.get('data', [])
                     if isinstance(data_list, list) and len(data_list) > 0:
@@ -146,7 +147,8 @@ def webhook():
                             print(f"🎯 LTP Found: {final_price}. Placing Precise LIMIT order.")
                 
                 if final_price == 0:
-                    print("⚠️ LTP Fetch failed or zero. Falling back to Standard Market Order.")
+                    print(f"⚠️ LTP Fetch failed or zero. Raw Data: {quote}")
+                    print("⚠️ Falling back to Standard Market Order.")
             except Exception as e:
                 print(f"⚠️ LTP Fetch Error: {e}. Falling back to Standard Market Order.")
         else:
