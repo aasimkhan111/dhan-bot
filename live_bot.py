@@ -43,8 +43,17 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
                 
                 # Apply ITM Offset (100 points for BankNifty, 50 for Nifty)
                 if "-ITM" in symbol:
-                    if option_type == 'CE': strike -= step
-                    else: strike += step
+                    # Check if there is a multiplier (e.g., ITM2, ITM3)
+                    multiplier = 1
+                    try:
+                        suffix = symbol.split("-ITM")[1]
+                        if suffix.isdigit():
+                            multiplier = int(suffix)
+                    except:
+                        pass
+                        
+                    if option_type == 'CE': strike -= (step * multiplier)
+                    else: strike += (step * multiplier)
 
             print(f"🎯 Using {symbol} logic for {base}: Strike {strike}")
             
