@@ -14,27 +14,31 @@ SECRET_TOKEN = "JunnarTrader2026"
 dhan_context = DhanContext(client_id=CLIENT_ID, access_token=ACCESS_TOKEN)
 dhan = dhanhq(dhan_context)
 
-print("Syncing with Dhan Master Scrip List...")
+print("Loading Dhan Master Scrip List...")
 SCRIP_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
 try:
     df = pd.read_csv(SCRIP_URL, low_memory=False)
 except:
     df = pd.read_csv(SCRIP_URL, sep='\t', low_memory=False)
 
-def find_col(keywords):
-    for kw in keywords:
-        for c in df.columns:
-            if kw.upper() in str(c).upper(): return c
-    return None
+# 🛠️ SUPER PRECISE COLUMN DETECTION
+def get_col(preferred_names, default_idx):
+    for name in preferred_names:
+        for actual in df.columns:
+            if name.upper() in str(actual).upper():
+                return actual
+    return df.columns[default_idx]
 
-COL_ID = find_col(['SMART_SYMBOL', 'SYMBOL_ID', 'SMART']) or df.columns[9]
-COL_SYMBOL = find_col(['TRADING_SYMBOL', 'SYMBOL_NAME']) or df.columns[2]
-COL_STRIKE = find_col(['STRIKE_PRICE', 'STRIKE']) or df.columns[7]
-COL_OPT_TYPE = find_col(['OPTION_TYPE', 'CALL_PUT']) or df.columns[8]
-COL_INST = find_col(['INSTRUMENT_NAME', 'INSTRUMENT']) or df.columns[1]
-COL_EXPIRY = find_col(['EXPIRY_DATE', 'EXPIRY']) or df.columns[6]
+# Standard Dhan CSV Headers often start with SEM_
+COL_EXCH   = get_col(['SEM_EXCHANGE_SEGMENT', 'EXCHANGE'], 0)
+COL_INST   = get_col(['SEM_INSTRUMENT_NAME', 'INSTRUMENT'], 1)
+COL_SYMBOL = get_col(['SEM_TRADING_SYMBOL', 'SYMBOL_NAME'], 2)
+COL_EXPIRY = get_col(['SEM_EXPIRY_DATE', 'EXPIRY'], 6)
+COL_STRIKE = get_col(['SEM_STRIKE_PRICE', 'STRIKE'], 7)
+COL_OPT    = get_col(['SEM_OPTION_TYPE', 'CALL_PUT'], 8)
+COL_ID     = get_col(['SEM_SMART_SYMBOL', 'SYMBOL_ID'], 11) # Usually col 11 or 12
 
-print(f"✅ Master Scrip List Sync Complete.")
+print(f"✅ Mapping: ID={COL_ID}, Symbol={COL_SYMBOL}, Strike={COL_STRIKE}")
 
 def get_security_id(symbol, price=0, opt_type='CE'):
     try:
@@ -42,28 +46,32 @@ def get_security_id(symbol, price=0, opt_type='CE'):
         opt_type = opt_type.upper()
         base = "BANKNIFTY" if "BANKNIFTY" in symbol else "NIFTY"
         
+        # 1. Filter by Instrument (Options) and Base Symbol
         mask = (df[COL_INST].astype(str).str.contains('OPT', case=False)) & \
                (df[COL_SYMBOL].astype(str).str.contains(base, case=False))
         
+        # 2. Filter by Option Type
         match_types = [opt_type]
-        if opt_type == 'CE': match_types.append('CALL')
-        if opt_type == 'PE': match_types.append('PUT')
-        mask &= (df[COL_OPT_TYPE].astype(str).isin(match_types))
+        if opt_type == 'CE': match_types.extend(['CALL', 'CE'])
+        if opt_type == 'PE': match_types.extend(['PUT', 'PE'])
+        mask &= (df[COL_OPT].astype(str).isin(match_types))
         
         subset = df[mask].copy()
         if subset.empty: return None
             
+        # 3. Find Nearest Strike
         subset['STRIKE_VAL'] = pd.to_numeric(subset[COL_STRIKE], errors='coerce')
         subset = subset.dropna(subset=['STRIKE_VAL'])
         subset['DIST'] = (subset['STRIKE_VAL'] - price).abs()
         
         min_dist = subset['DIST'].min()
+        # Get nearest strike and nearest expiry
         final_res = subset[subset['DIST'] == min_dist].sort_values(by=COL_EXPIRY)
         
         if not final_res.empty:
             found = final_res.iloc[0]
             s_id = str(int(float(found[COL_ID])))
-            print(f"✅ FOUND: {found[COL_SYMBOL]} | ID: {s_id}")
+            print(f"✅ MATCH: {found[COL_SYMBOL]} | ID: {s_id} | Exch: {found[COL_EXCH]}")
             return s_id
             
         return None
@@ -79,10 +87,10 @@ def webhook():
         print(f"\n📥 Signal: {data}")
 
         if data.get('secret') != SECRET_TOKEN:
-            return jsonify({"error": "Auth Fail"}), 403
+            return jsonify({"error": "Unauthorized"}), 403
 
         if data.get('action') == 'exit':
-            print("🛑 Squaring Off All Positions...")
+            print("🛑 Squaring Off All...")
             pos_res = dhan.get_positions()
             if pos_res.get('status') == 'success':
                 for pos in pos_res.get('data', []):
@@ -95,40 +103,38 @@ def webhook():
                             quantity=abs(qty),
                             order_type=dhan.MARKET,
                             product_type=pos.get('productType'),
-                            price=0,
-                            trigger_price=0,
-                            validity=dhan.DAY,
-                            after_market_order=False
+                            price=0, trigger_price=0, validity=dhan.DAY
                         )
                 return jsonify({"status": "success"}), 200
-            return jsonify({"error": "Pos Fetch Fail"}), 500
+            return jsonify({"error": "Failed to fetch positions"}), 500
 
+        # ENTRY LOGIC
         symbol = data.get('symbol', 'BANKNIFTY-ATM')
         price = float(data.get('price', 0))
         opt_type = data.get('option_type', 'CE').upper()
         quantity = int(data.get('quantity', 300))
 
         sec_id = get_security_id(symbol, price, opt_type)
-        if not sec_id: return jsonify({"error": "Symbol Not Found"}), 404
+        if not sec_id: return jsonify({"error": "Security Not Found"}), 404
 
-        # Place Order with robust F&O parameters
+        # Place Market Order
         order_res = dhan.place_order(
             security_id=sec_id,
-            exchange_segment=dhan.FNO, # Explicitly NSE_FNO
+            exchange_segment=dhan.FNO,
             transaction_type=dhan.BUY,
             quantity=quantity,
             order_type=dhan.MARKET,
-            product_type=dhan.MARGIN, # F&O usually requires MARGIN
+            product_type=dhan.MARGIN, # Standard for F&O
             price=0,
             trigger_price=0,
             validity=dhan.DAY,
             after_market_order=False
         )
-        print(f"📡 Dhan Response: {order_res}")
+        print(f"📡 Dhan: {order_res}")
         return jsonify(order_res), 200
 
     except Exception as e:
-        print(f"❌ Webhook Error: {str(e)}")
+        print(f"❌ Error: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
