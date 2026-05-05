@@ -20,16 +20,18 @@ df = pd.read_csv(SCRIP_URL, low_memory=False)
 def get_security_id(symbol, price=0, option_type=None):
     try:
         symbol = symbol.upper()
+        # Map CE/PE to CALL/PUT for Dhan Master List
+        dhan_opt_type = 'CALL' if option_type == 'CE' else 'PUT'
+        
         if "-ATM" in symbol or "-ITM" in symbol:
             base = symbol.split("-ATM")[0].split("-ITM")[0]
             step = 100 if "BANKNIFTY" in base else 50
             strike = round(price / step) * step
             
-            # Simple ATM logic for the user's specific script
             mask = (df['SEM_INSTRUMENT_NAME'] == 'OPTIDX') & \
                    (df['SEM_TRADING_SYMBOL'].str.contains(base)) & \
                    (df['SEM_STRIKE_PRICE'] == strike) & \
-                   (df['SEM_OPTION_TYPE'] == option_type)
+                   (df['SEM_OPTION_TYPE'] == dhan_opt_type)
             
             res = df[mask].sort_values(by='SEM_EXPIRY_DATE')
             if not res.empty:
@@ -87,6 +89,7 @@ def webhook():
         sec_id, exch_seg = get_security_id(symbol, price, opt_type)
         
         if not sec_id:
+            print(f"❌ Symbol not found for {symbol} at {price} with {opt_type}")
             return jsonify({"error": f"Symbol {symbol} not found"}), 404
 
         response = dhan.place_order(
