@@ -105,19 +105,6 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    data = request.get_json(force=True, silent=True)
-    
-    if not data or data.get('secret') != SECRET_TOKEN:
-        print(f"🔴 403 ERROR! Unauthorized request.")
-        return jsonify({"status": "error", "remarks": "Unauthorized"}), 403
-
-    symbol = data.get('symbol')
-    price = float(data.get('price', 0))
-    option_type = data.get('option_type', 'CE').upper()
-    manual_strike = data.get('itm_strike')
-
-    # 1. Resolve exact Security ID and Instrument Type
-    sec_id, inst_name = get_security_id(symbol, price, option_type, manual_strike)
     
     if not sec_id:
         return jsonify({"status": "error", "remarks": "Symbol not found"}), 400
