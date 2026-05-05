@@ -18,17 +18,14 @@ print("Syncing with Dhan Master Scrip List...")
 SCRIP_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
 try:
     df = pd.read_csv(SCRIP_URL, low_memory=False)
-    print(f"✅ Loaded {len(df)} scrips.")
 except:
-    print("⚠️ Comma separated fail, trying Tab separated...")
     df = pd.read_csv(SCRIP_URL, sep='\t', low_memory=False)
 
-# --- DYNAMIC COLUMN DETECTOR (BULLETPROOF) ---
+# Detect Columns
 def find_col(keywords):
     for kw in keywords:
         for c in df.columns:
-            if kw.upper() in str(c).upper():
-                return c
+            if kw.upper() in str(c).upper(): return c
     return None
 
 COL_ID = find_col(['SMART_SYMBOL', 'SYMBOL_ID', 'SMART']) or df.columns[9]
@@ -39,7 +36,7 @@ COL_INST = find_col(['INSTRUMENT_NAME', 'INSTRUMENT']) or df.columns[1]
 COL_EXPIRY = find_col(['EXPIRY_DATE', 'EXPIRY']) or df.columns[6]
 COL_EXCH = find_col(['EXCHANGE_SEGMENT', 'EXCHANGE']) or df.columns[0]
 
-print(f"📊 Mapped Columns: ID={COL_ID}, Symbol={COL_SYMBOL}, Strike={COL_STRIKE}")
+print(f"✅ Master Loaded. Columns mapped.")
 
 def get_security_id(symbol, price=0, opt_type='CE'):
     try:
@@ -47,11 +44,9 @@ def get_security_id(symbol, price=0, opt_type='CE'):
         opt_type = opt_type.upper()
         base = "BANKNIFTY" if "BANKNIFTY" in symbol else "NIFTY"
         
-        # 1. Filter for Options
         mask = (df[COL_INST].astype(str).str.contains('OPT', case=False)) & \
                (df[COL_SYMBOL].astype(str).str.contains(base, case=False))
         
-        # 2. Option Type (CE/CALL or PE/PUT)
         match_types = [opt_type]
         if opt_type == 'CE': match_types.append('CALL')
         if opt_type == 'PE': match_types.append('PUT')
@@ -60,19 +55,19 @@ def get_security_id(symbol, price=0, opt_type='CE'):
         subset = df[mask].copy()
         if subset.empty: return None, None
             
-        # 3. Strike Match
         subset['STRIKE_VAL'] = pd.to_numeric(subset[COL_STRIKE], errors='coerce')
         subset = subset.dropna(subset=['STRIKE_VAL'])
         subset['DIST'] = (subset['STRIKE_VAL'] - price).abs()
         
-        # Find nearest strike and nearest expiry
         min_dist = subset['DIST'].min()
         final_res = subset[subset['DIST'] == min_dist].sort_values(by=COL_EXPIRY)
         
         if not final_res.empty:
             found = final_res.iloc[0]
-            print(f"✅ FOUND: {found[COL_SYMBOL]} | ID: {found[COL_ID]}")
-            return str(found[COL_ID]), found[COL_EXCH]
+            # Convert ID to clean string (removing .0 if any)
+            s_id = str(int(float(found[COL_ID])))
+            print(f"✅ FOUND: {found[COL_SYMBOL]} | ID: {s_id}")
+            return s_id, found[COL_EXCH]
             
         return None, None
     except Exception as e:
@@ -83,8 +78,7 @@ def get_security_id(symbol, price=0, opt_type='CE'):
 def webhook():
     try:
         data = request.get_json(force=True, silent=True)
-        if not data: return jsonify({"error": "Empty body"}), 400
-
+        if not data: return jsonify({"error": "No Data"}), 400
         print(f"\n📥 Received: {data}")
 
         if data.get('secret') != SECRET_TOKEN:
@@ -104,10 +98,13 @@ def webhook():
                             quantity=abs(qty),
                             order_type=dhan.MARKET,
                             product_type=pos.get('productType'),
+                            price=0, # Added for consistency
+                            trigger_price=0,
+                            validity=dhan.DAY,
                             after_market_order=False
                         )
                 return jsonify({"status": "success"}), 200
-            return jsonify({"error": "Pos Fetch Error"}), 500
+            return jsonify({"error": "Pos Fail"}), 500
 
         symbol = data.get('symbol', 'BANKNIFTY-ATM')
         price = float(data.get('price', 0))
@@ -115,8 +112,9 @@ def webhook():
         quantity = int(data.get('quantity', 300))
 
         sec_id, exch_seg = get_security_id(symbol, price, opt_type)
-        if not sec_id: return jsonify({"error": "No ID found"}), 404
+        if not sec_id: return jsonify({"error": "No ID"}), 404
 
+        # Place Order with all required arguments
         order_res = dhan.place_order(
             security_id=sec_id,
             exchange_segment=exch_seg,
@@ -124,6 +122,9 @@ def webhook():
             quantity=quantity,
             order_type=dhan.MARKET,
             product_type=dhan.INTRA,
+            price=0, # Fixed: Missing price argument
+            trigger_price=0,
+            validity=dhan.DAY,
             after_market_order=False
         )
         print(f"📡 Response: {order_res}")
