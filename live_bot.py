@@ -21,7 +21,6 @@ try:
 except:
     df = pd.read_csv(SCRIP_URL, sep='\t', low_memory=False)
 
-# Detect Columns
 def find_col(keywords):
     for kw in keywords:
         for c in df.columns:
@@ -34,9 +33,8 @@ COL_STRIKE = find_col(['STRIKE_PRICE', 'STRIKE']) or df.columns[7]
 COL_OPT_TYPE = find_col(['OPTION_TYPE', 'CALL_PUT']) or df.columns[8]
 COL_INST = find_col(['INSTRUMENT_NAME', 'INSTRUMENT']) or df.columns[1]
 COL_EXPIRY = find_col(['EXPIRY_DATE', 'EXPIRY']) or df.columns[6]
-COL_EXCH = find_col(['EXCHANGE_SEGMENT', 'EXCHANGE']) or df.columns[0]
 
-print(f"✅ Master Loaded. Columns mapped.")
+print(f"✅ Master Scrip List Sync Complete.")
 
 def get_security_id(symbol, price=0, opt_type='CE'):
     try:
@@ -53,7 +51,7 @@ def get_security_id(symbol, price=0, opt_type='CE'):
         mask &= (df[COL_OPT_TYPE].astype(str).isin(match_types))
         
         subset = df[mask].copy()
-        if subset.empty: return None, None
+        if subset.empty: return None
             
         subset['STRIKE_VAL'] = pd.to_numeric(subset[COL_STRIKE], errors='coerce')
         subset = subset.dropna(subset=['STRIKE_VAL'])
@@ -64,28 +62,27 @@ def get_security_id(symbol, price=0, opt_type='CE'):
         
         if not final_res.empty:
             found = final_res.iloc[0]
-            # Convert ID to clean string (removing .0 if any)
             s_id = str(int(float(found[COL_ID])))
             print(f"✅ FOUND: {found[COL_SYMBOL]} | ID: {s_id}")
-            return s_id, found[COL_EXCH]
+            return s_id
             
-        return None, None
+        return None
     except Exception as e:
         print(f"⚠️ Search Error: {str(e)}")
-        return None, None
+        return None
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         data = request.get_json(force=True, silent=True)
         if not data: return jsonify({"error": "No Data"}), 400
-        print(f"\n📥 Received: {data}")
+        print(f"\n📥 Signal: {data}")
 
         if data.get('secret') != SECRET_TOKEN:
-            return jsonify({"error": "Wrong Secret"}), 403
+            return jsonify({"error": "Auth Fail"}), 403
 
         if data.get('action') == 'exit':
-            print("🛑 Exit Triggered...")
+            print("🛑 Squaring Off All Positions...")
             pos_res = dhan.get_positions()
             if pos_res.get('status') == 'success':
                 for pos in pos_res.get('data', []):
@@ -98,36 +95,36 @@ def webhook():
                             quantity=abs(qty),
                             order_type=dhan.MARKET,
                             product_type=pos.get('productType'),
-                            price=0, # Added for consistency
+                            price=0,
                             trigger_price=0,
                             validity=dhan.DAY,
                             after_market_order=False
                         )
                 return jsonify({"status": "success"}), 200
-            return jsonify({"error": "Pos Fail"}), 500
+            return jsonify({"error": "Pos Fetch Fail"}), 500
 
         symbol = data.get('symbol', 'BANKNIFTY-ATM')
         price = float(data.get('price', 0))
         opt_type = data.get('option_type', 'CE').upper()
         quantity = int(data.get('quantity', 300))
 
-        sec_id, exch_seg = get_security_id(symbol, price, opt_type)
-        if not sec_id: return jsonify({"error": "No ID"}), 404
+        sec_id = get_security_id(symbol, price, opt_type)
+        if not sec_id: return jsonify({"error": "Symbol Not Found"}), 404
 
-        # Place Order with all required arguments
+        # Place Order with robust F&O parameters
         order_res = dhan.place_order(
             security_id=sec_id,
-            exchange_segment=exch_seg,
+            exchange_segment=dhan.FNO, # Explicitly NSE_FNO
             transaction_type=dhan.BUY,
             quantity=quantity,
             order_type=dhan.MARKET,
-            product_type=dhan.INTRA,
-            price=0, # Fixed: Missing price argument
+            product_type=dhan.MARGIN, # F&O usually requires MARGIN
+            price=0,
             trigger_price=0,
             validity=dhan.DAY,
             after_market_order=False
         )
-        print(f"📡 Response: {order_res}")
+        print(f"📡 Dhan Response: {order_res}")
         return jsonify(order_res), 200
 
     except Exception as e:
