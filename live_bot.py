@@ -14,31 +14,32 @@ SECRET_TOKEN = "JunnarTrader2026"
 dhan_context = DhanContext(client_id=CLIENT_ID, access_token=ACCESS_TOKEN)
 dhan = dhanhq(dhan_context)
 
-print("Loading Dhan Master Scrip List...")
+print("--- SYNCING SCRIP MASTER ---")
 SCRIP_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
 try:
     df = pd.read_csv(SCRIP_URL, low_memory=False)
 except:
     df = pd.read_csv(SCRIP_URL, sep='\t', low_memory=False)
 
-# 🛠️ SUPER PRECISE COLUMN DETECTION
-def get_col(preferred_names, default_idx):
-    for name in preferred_names:
+# 🔍 DEBUG: PRINT HEADERS TO LOGS
+print(f"COLUMNS FOUND ({len(df.columns)}): {list(df.columns)}")
+
+def get_col(keywords, default_idx):
+    for name in keywords:
         for actual in df.columns:
-            if name.upper() in str(actual).upper():
-                return actual
+            if name.upper() in str(actual).upper(): return actual
     return df.columns[default_idx]
 
-# Standard Dhan CSV Headers often start with SEM_
-COL_EXCH   = get_col(['SEM_EXCHANGE_SEGMENT', 'EXCHANGE'], 0)
+# Map columns with fallback
+COL_EXCH   = get_col(['SEM_EXCHANGE_SEGMENT', 'SEGMENT', 'EXCHANGE'], 0)
 COL_INST   = get_col(['SEM_INSTRUMENT_NAME', 'INSTRUMENT'], 1)
-COL_SYMBOL = get_col(['SEM_TRADING_SYMBOL', 'SYMBOL_NAME'], 2)
+COL_SYMBOL = get_col(['SEM_TRADING_SYMBOL', 'SYMBOL_NAME', 'TRADING'], 2)
 COL_EXPIRY = get_col(['SEM_EXPIRY_DATE', 'EXPIRY'], 6)
 COL_STRIKE = get_col(['SEM_STRIKE_PRICE', 'STRIKE'], 7)
-COL_OPT    = get_col(['SEM_OPTION_TYPE', 'CALL_PUT'], 8)
-COL_ID     = get_col(['SEM_SMART_SYMBOL', 'SYMBOL_ID'], 11) # Usually col 11 or 12
+COL_OPT    = get_col(['SEM_OPTION_TYPE', 'OPTION'], 8)
+COL_ID     = get_col(['SEM_SMART_SYMBOL', 'SMART_SYMBOL', 'SYMBOL_ID'], 11)
 
-print(f"✅ Mapping: ID={COL_ID}, Symbol={COL_SYMBOL}, Strike={COL_STRIKE}")
+print(f"Current Mapping -> ID: {COL_ID}, Symbol: {COL_SYMBOL}, Exch: {COL_EXCH}")
 
 def get_security_id(symbol, price=0, opt_type='CE'):
     try:
@@ -46,11 +47,11 @@ def get_security_id(symbol, price=0, opt_type='CE'):
         opt_type = opt_type.upper()
         base = "BANKNIFTY" if "BANKNIFTY" in symbol else "NIFTY"
         
-        # 1. Filter by Instrument (Options) and Base Symbol
+        # Filter for Options and Base
         mask = (df[COL_INST].astype(str).str.contains('OPT', case=False)) & \
                (df[COL_SYMBOL].astype(str).str.contains(base, case=False))
         
-        # 2. Filter by Option Type
+        # Match CE/PE
         match_types = [opt_type]
         if opt_type == 'CE': match_types.extend(['CALL', 'CE'])
         if opt_type == 'PE': match_types.extend(['PUT', 'PE'])
@@ -59,17 +60,17 @@ def get_security_id(symbol, price=0, opt_type='CE'):
         subset = df[mask].copy()
         if subset.empty: return None
             
-        # 3. Find Nearest Strike
+        # Match Strike
         subset['STRIKE_VAL'] = pd.to_numeric(subset[COL_STRIKE], errors='coerce')
         subset = subset.dropna(subset=['STRIKE_VAL'])
         subset['DIST'] = (subset['STRIKE_VAL'] - price).abs()
         
         min_dist = subset['DIST'].min()
-        # Get nearest strike and nearest expiry
         final_res = subset[subset['DIST'] == min_dist].sort_values(by=COL_EXPIRY)
         
         if not final_res.empty:
             found = final_res.iloc[0]
+            # Convert ID to string
             s_id = str(int(float(found[COL_ID])))
             print(f"✅ MATCH: {found[COL_SYMBOL]} | ID: {s_id} | Exch: {found[COL_EXCH]}")
             return s_id
@@ -83,14 +84,14 @@ def get_security_id(symbol, price=0, opt_type='CE'):
 def webhook():
     try:
         data = request.get_json(force=True, silent=True)
-        if not data: return jsonify({"error": "No Data"}), 400
+        if not data: return jsonify({"error": "No JSON"}), 400
         print(f"\n📥 Signal: {data}")
 
         if data.get('secret') != SECRET_TOKEN:
-            return jsonify({"error": "Unauthorized"}), 403
+            return jsonify({"error": "Auth Fail"}), 403
 
         if data.get('action') == 'exit':
-            print("🛑 Squaring Off All...")
+            print("🛑 EXIT ALL POSITIONS")
             pos_res = dhan.get_positions()
             if pos_res.get('status') == 'success':
                 for pos in pos_res.get('data', []):
@@ -106,31 +107,29 @@ def webhook():
                             price=0, trigger_price=0, validity=dhan.DAY
                         )
                 return jsonify({"status": "success"}), 200
-            return jsonify({"error": "Failed to fetch positions"}), 500
+            return jsonify({"error": "Pos Fail"}), 500
 
-        # ENTRY LOGIC
+        # ENTRY
         symbol = data.get('symbol', 'BANKNIFTY-ATM')
         price = float(data.get('price', 0))
         opt_type = data.get('option_type', 'CE').upper()
         quantity = int(data.get('quantity', 300))
 
         sec_id = get_security_id(symbol, price, opt_type)
-        if not sec_id: return jsonify({"error": "Security Not Found"}), 404
+        if not sec_id: return jsonify({"error": "NotFound"}), 404
 
-        # Place Market Order
+        # Place Order
         order_res = dhan.place_order(
             security_id=sec_id,
             exchange_segment=dhan.FNO,
             transaction_type=dhan.BUY,
             quantity=quantity,
             order_type=dhan.MARKET,
-            product_type=dhan.MARGIN, # Standard for F&O
-            price=0,
-            trigger_price=0,
-            validity=dhan.DAY,
+            product_type=dhan.MARGIN,
+            price=0, trigger_price=0, validity=dhan.DAY,
             after_market_order=False
         )
-        print(f"📡 Dhan: {order_res}")
+        print(f"📡 Response: {order_res}")
         return jsonify(order_res), 200
 
     except Exception as e:
