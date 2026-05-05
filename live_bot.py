@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from flask import Flask, request, jsonify
 from dhanhq import dhanhq, DhanContext
 
@@ -23,24 +24,22 @@ def get_security_id(symbol, price=0, opt_type='CE'):
         symbol = symbol.upper()
         opt_type = opt_type.upper()
         
-        print(f"🔍 Searching for: Symbol={symbol}, Price={price}, Type={opt_type}")
+        print(f"🔍 Searching: {symbol} | Price: {price} | Type: {opt_type}")
         
         if "-ATM" in symbol or "-ITM" in symbol:
-            # Detect Base
             base = "BANKNIFTY" if "BANKNIFTY" in symbol else "NIFTY"
             step = 100 if base == "BANKNIFTY" else 50
             strike = int(round(price / step) * step)
             
-            print(f"⚙️ Calc: Base={base}, Step={step}, Target Strike={strike}")
+            print(f"⚙️ Target Strike: {strike}")
             
-            # Step 1: Filter by Instrument and Base name
+            # Use numeric conversion with error handling to avoid NaN issues
+            df_strikes = pd.to_numeric(df['SEM_STRIKE_PRICE'], errors='coerce')
+            
             mask = (df['SEM_INSTRUMENT_NAME'] == 'OPTIDX') & \
-                   (df['SEM_TRADING_SYMBOL'].str.contains(base, case=False))
+                   (df['SEM_TRADING_SYMBOL'].str.contains(base, case=False)) & \
+                   (df_strikes == strike)
             
-            # Step 2: Filter by Strike Price (handling float precision)
-            mask &= (df['SEM_STRIKE_PRICE'].astype(float).astype(int) == strike)
-            
-            # Step 3: Filter by Option Type (Check CE/PE and CALL/PUT)
             opt_types_to_check = [opt_type]
             if opt_type == 'CE': opt_types_to_check.append('CALL')
             if opt_type == 'PE': opt_types_to_check.append('PUT')
@@ -54,16 +53,15 @@ def get_security_id(symbol, price=0, opt_type='CE'):
                 print(f"✅ Found Match: {found['SEM_TRADING_SYMBOL']} | ID: {found['SEM_SMART_SYMBOL']}")
                 return found['SEM_SMART_SYMBOL'], found['SEM_EXCHANGE_SEGMENT']
             else:
-                print(f"❌ No match found in Master List for Strike {strike} and Type {opt_type}")
+                print(f"❌ No exact match for Strike {strike}")
         
-        # Direct lookup if not ATM/ITM
         res = df[df['SEM_TRADING_SYMBOL'] == symbol]
         if not res.empty:
             return res.iloc[0]['SEM_SMART_SYMBOL'], res.iloc[0]['SEM_EXCHANGE_SEGMENT']
             
         return None, None
     except Exception as e:
-        print(f"⚠️ Lookup Error: {str(e)}")
+        print(f"⚠️ Lookup Error Details: {str(e)}")
         return None, None
 
 @app.route('/webhook', methods=['POST'])
@@ -71,23 +69,20 @@ def webhook():
     try:
         data = request.get_json(force=True, silent=True)
         if not data:
-            return jsonify({"error": "Invalid JSON"}), 400
+            return jsonify({"error": "No Data"}), 400
 
-        print(f"\n📥 Received Signal: {data}")
+        print(f"\n📥 Signal: {data}")
 
         if data.get('secret') != SECRET_TOKEN:
-            return jsonify({"error": "Invalid Secret"}), 403
+            return jsonify({"error": "Auth Failed"}), 403
 
-        # --- EXIT LOGIC ---
         if data.get('action') == 'exit':
-            print("🛑 Processing Square Off...")
+            print("🛑 Squaring Off...")
             pos_res = dhan.get_positions()
             if pos_res.get('status') == 'success':
-                positions = pos_res.get('data', [])
-                for pos in positions:
+                for pos in pos_res.get('data', []):
                     qty = int(pos.get('netQty', 0))
                     if qty != 0:
-                        print(f"Closing {pos.get('tradingSymbol')} | Qty: {qty}")
                         dhan.place_order(
                             security_id=pos.get('securityId'),
                             exchange_segment=pos.get('exchangeSegment'),
@@ -97,14 +92,10 @@ def webhook():
                             product_type=pos.get('productType'),
                             after_market_order=False
                         )
-                return jsonify({"status": "success", "message": "Exit Done"}), 200
-            return jsonify({"error": "Fetch Positions Failed"}), 500
+                return jsonify({"status": "success"}), 200
+            return jsonify({"error": "Pos Fetch Fail"}), 500
 
-        # --- ORDER LOGIC ---
         symbol = data.get('symbol')
-        if not symbol:
-            return jsonify({"error": "Missing Symbol"}), 400
-            
         side = data.get('side', 'buy').upper()
         price = float(data.get('price', 0))
         opt_type = data.get('option_type', 'CE').upper()
@@ -112,7 +103,7 @@ def webhook():
         sec_id, exch_seg = get_security_id(symbol, price, opt_type)
         
         if not sec_id:
-            return jsonify({"error": f"Symbol {symbol} not found in Dhan Master List"}), 404
+            return jsonify({"error": "Not Found"}), 404
 
         order_res = dhan.place_order(
             security_id=int(sec_id),
