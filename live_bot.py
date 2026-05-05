@@ -20,7 +20,6 @@ df = pd.read_csv(SCRIP_URL, low_memory=False)
 def get_security_id(symbol, price=0, option_type=None):
     try:
         symbol = symbol.upper()
-        # Map CE/PE to CALL/PUT for Dhan Master List
         dhan_opt_type = 'CALL' if option_type == 'CE' else 'PUT'
         
         if "-ATM" in symbol or "-ITM" in symbol:
@@ -37,7 +36,6 @@ def get_security_id(symbol, price=0, option_type=None):
             if not res.empty:
                 return res.iloc[0]['SEM_SMART_SYMBOL'], res.iloc[0]['SEM_EXCHANGE_SEGMENT']
         
-        # Direct lookup
         res = df[df['SEM_TRADING_SYMBOL'] == symbol]
         if not res.empty:
             return res.iloc[0]['SEM_SMART_SYMBOL'], res.iloc[0]['SEM_EXCHANGE_SEGMENT']
@@ -49,13 +47,18 @@ def get_security_id(symbol, price=0, option_type=None):
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        data = request.get_json()
+        # Use force=True to handle cases where Content-Type is not application/json
+        data = request.get_json(force=True, silent=True)
+        
+        if not data:
+            print("❌ Error: Received empty or invalid JSON")
+            return jsonify({"error": "Invalid JSON"}), 400
+
         print(f"📥 Received Webhook: {data}")
 
         if data.get('secret') != SECRET_TOKEN:
             return jsonify({"error": "Invalid Secret"}), 403
 
-        # --- SPECIAL CASE: EXIT ALL POSITIONS ---
         if data.get('action') == 'exit':
             print("🛑 Exit signal received! Squaring off all positions...")
             pos_res = dhan.get_positions()
@@ -77,7 +80,6 @@ def webhook():
                 return jsonify({"status": "success", "message": "All positions closed"}), 200
             return jsonify({"error": "Could not fetch positions"}), 500
 
-        # --- NORMAL ORDER LOGIC ---
         symbol = data.get('symbol')
         if not symbol:
             return jsonify({"error": "No symbol provided"}), 400
@@ -106,7 +108,7 @@ def webhook():
         return jsonify(response), 200
 
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        print(f"❌ Exception: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
