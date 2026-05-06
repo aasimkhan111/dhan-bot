@@ -6,8 +6,8 @@ app = Flask(__name__)
 
 # --- LIVE CONFIG ---
 # Replace these with your exact Client ID and Access Token from your main LIVE PORTAL!
-CLIENT_ID = "1110308836"
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4MTE4MjYyLCJpYXQiOjE3NzgwMzE4NjIsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTEwMzA4ODM2In0.sJApK7iDo6lXe8a-ZqIDqHE71nnrUYoAZmGQfiVFkH1nRtPcVdHDly5XPkAOoEhigGwjyDSusIdLVyUuXBKf8Q"
+CLIENT_ID = "1100819221"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4MDU3NTY3LCJpYXQiOjE3Nzc5NzExNjcsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAwODE5MjIxIn0.RgZKLwjRfPQZCm0Z0fBIw7_846mnl6fO4aeGeeM-_QTjT4WannQxQXi8GSWplCerYxobfQjttgUDd0akbrA4Ng"
 SECRET_TOKEN = "JunnarTrader2026"
 
 # Connect to the Live Trading System (Version 2.2.0 - New Context Pattern)
@@ -133,12 +133,38 @@ def webhook():
     side_str = data.get('side', 'BUY').upper()
     
     try:
-        # We always use MARKET order for Options to ensure immediate execution 
-        # and prevent orders from getting stuck due to delayed API price data.
         dhan_order_type = dhan.MARKET
         final_price = 0.0
         
-        print(f"🚀 Firing MARKET order for ID: {sec_id}")
+        # 1. Fetch exact LTP from Dhan Data API to satisfy strict Limit requirements
+        print(f"🔍 Fetching Precise LTP for {sec_id} via Data API...")
+        try:
+            seg_key = "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE"
+            securities = {seg_key: [int(sec_id)]}
+            
+            quote = dhan.ticker_data(securities)
+            print(f"📊 Raw Ticker Response: {quote}")
+            
+            # Parse the response safely
+            if isinstance(quote, dict) and quote.get('status') == 'success':
+                outer_data = quote.get('data', {})
+                inner_data = outer_data.get('data', {})
+                seg_data = inner_data.get(seg_key, {})
+                id_data = seg_data.get(str(sec_id), {})
+                
+                ltp = float(id_data.get('last_price', 0))
+                if ltp > 0:
+                    final_price = ltp
+                    dhan_order_type = dhan.LIMIT
+                    print(f"🎯 LTP Found: {final_price}. Changing to EXACT LIMIT order.")
+                else:
+                    print("⚠️ LTP was 0. Falling back to Market (Protection).")
+            else:
+                print("⚠️ Data API failed (Maybe not Subscribed). Falling back to Market (Protection).")
+        except Exception as e:
+            print(f"⚠️ Error fetching LTP: {e}. Falling back to Market.")
+        
+        print(f"🚀 Firing {dhan_order_type} order for ID: {sec_id} at price: {final_price}")
 
         # 2. Place order using strictly verified params
         response = dhan.place_order(
