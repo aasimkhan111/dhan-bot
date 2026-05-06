@@ -1,140 +1,197 @@
 import pandas as pd
-import numpy as np
 from flask import Flask, request, jsonify
 from dhanhq import dhanhq, DhanContext
 
 app = Flask(__name__)
 
 # --- LIVE CONFIG ---
-CLIENT_ID = "1100819221"
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4MDU3NTY3LCJpYXQiOjE3Nzc5NzExNjcsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAwODE5MjIxIn0.RgZKLwjRfPQZCm0Z0fBIw7_846mnl6fO4aeGeeM-_QTjT4WannQxQXi8GSWplCerYxobfQjttgUDd0akbrA4Ng"
+# Replace these with your exact Client ID and Access Token from your main LIVE PORTAL!
+CLIENT_ID = "1110308836"
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzc4MTE4MjYyLCJpYXQiOjE3NzgwMzE4NjIsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTEwMzA4ODM2In0.sJApK7iDo6lXe8a-ZqIDqHE71nnrUYoAZmGQfiVFkH1nRtPcVdHDly5XPkAOoEhigGwjyDSusIdLVyUuXBKf8Q"
 SECRET_TOKEN = "JunnarTrader2026"
 
-# Connect to Dhan
+# Connect to the Live Trading System (Version 2.2.0 - New Context Pattern)
 dhan_context = DhanContext(client_id=CLIENT_ID, access_token=ACCESS_TOKEN)
 dhan = dhanhq(dhan_context)
 
-print("--- SYNCING SCRIP MASTER ---")
+# Notice here that we REMOVED the `dhan.base_url = ...` line!
+# The default library URL points directly to the live environment.
+
+print("Syncing with Dhan Master Scrip List...")
 SCRIP_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
-try:
-    df = pd.read_csv(SCRIP_URL, low_memory=False)
-except:
-    df = pd.read_csv(SCRIP_URL, sep='\t', low_memory=False)
 
-# 🔍 DEBUG: PRINT HEADERS TO LOGS
-print(f"COLUMNS FOUND ({len(df.columns)}): {list(df.columns)}")
+# Added low_memory=False to fix the DtypeWarning
+df = pd.read_csv(SCRIP_URL, low_memory=False)
 
-def get_col(keywords, default_idx):
-    for name in keywords:
-        for actual in df.columns:
-            if name.upper() in str(actual).upper(): return actual
-    return df.columns[default_idx]
-
-# Map columns with fallback
-COL_EXCH   = get_col(['SEM_EXCHANGE_SEGMENT', 'SEGMENT', 'EXCHANGE'], 0)
-COL_INST   = get_col(['SEM_INSTRUMENT_NAME', 'INSTRUMENT'], 1)
-COL_SYMBOL = get_col(['SEM_TRADING_SYMBOL', 'SYMBOL_NAME', 'TRADING'], 2)
-COL_EXPIRY = get_col(['SEM_EXPIRY_DATE', 'EXPIRY'], 6)
-COL_STRIKE = get_col(['SEM_STRIKE_PRICE', 'STRIKE'], 7)
-COL_OPT    = get_col(['SEM_OPTION_TYPE', 'OPTION'], 8)
-COL_ID     = get_col(['SEM_SMART_SYMBOL', 'SMART_SYMBOL', 'SYMBOL_ID'], 11)
-
-print(f"Current Mapping -> ID: {COL_ID}, Symbol: {COL_SYMBOL}, Exch: {COL_EXCH}")
-
-def get_security_id(symbol, price=0, opt_type='CE'):
+def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
     try:
         symbol = symbol.upper()
-        opt_type = opt_type.upper()
-        base = "BANKNIFTY" if "BANKNIFTY" in symbol else "NIFTY"
-        
-        # Filter for Options and Base
-        mask = (df[COL_INST].astype(str).str.contains('OPT', case=False)) & \
-               (df[COL_SYMBOL].astype(str).str.contains(base, case=False))
-        
-        # Match CE/PE
-        match_types = [opt_type]
-        if opt_type == 'CE': match_types.extend(['CALL', 'CE'])
-        if opt_type == 'PE': match_types.extend(['PUT', 'PE'])
-        mask &= (df[COL_OPT].astype(str).isin(match_types))
-        
-        subset = df[mask].copy()
-        if subset.empty: return None
+        # --- DYNAMIC ATM/ITM LOGIC ---
+        if "-ATM" in symbol or "-ITM" in symbol:
+            base = symbol.split("-ATM")[0].split("-ITM")[0]
             
-        # Match Strike
-        subset['STRIKE_VAL'] = pd.to_numeric(subset[COL_STRIKE], errors='coerce')
-        subset = subset.dropna(subset=['STRIKE_VAL'])
-        subset['DIST'] = (subset['STRIKE_VAL'] - price).abs()
-        
-        min_dist = subset['DIST'].min()
-        final_res = subset[subset['DIST'] == min_dist].sort_values(by=COL_EXPIRY)
-        
-        if not final_res.empty:
-            found = final_res.iloc[0]
-            # Convert ID to string
-            s_id = str(int(float(found[COL_ID])))
-            print(f"✅ MATCH: {found[COL_SYMBOL]} | ID: {s_id} | Exch: {found[COL_EXCH]}")
-            return s_id
+            # Use manual strike if provided (for precise exits), else calculate from price
+            if manual_strike:
+                strike = float(manual_strike)
+            else:
+                if price == 0:
+                    print(f"❌ Error: price=0 received for {symbol} request.")
+                    return None, None
+                # Calculate Strike (Step of 100 for BankNifty, 50 for Nifty)
+                step = 100 if "BANKNIFTY" in base else 50
+                strike = round(price / step) * step
+                
+                # Apply ITM Offset (100 points for BankNifty, 50 for Nifty)
+                if "-ITM" in symbol:
+                    # Check if there is a multiplier (e.g., ITM2, ITM3)
+                    multiplier = 1
+                    try:
+                        suffix = symbol.split("-ITM")[1]
+                        if suffix.isdigit():
+                            multiplier = int(suffix)
+                    except:
+                        pass
+                        
+                    if option_type == 'CE': strike -= (step * multiplier)
+                    else: strike += (step * multiplier)
+
+            print(f"🎯 Using {symbol} logic for {base}: Strike {strike}")
             
-        return None
+            # Find the option with this strike and nearest expiry
+            match = df[(df['SEM_INSTRUMENT_NAME'] == 'OPTIDX') & 
+                       (df['SEM_STRIKE_PRICE'].astype(float) == float(strike)) &
+                       (df['SEM_OPTION_TYPE'] == option_type) &
+                       ((df['SM_SYMBOL_NAME'].str.contains(base, case=False, na=False)) | 
+                        (df['SEM_CUSTOM_SYMBOL'].str.contains(base, case=False, na=False)) |
+                        (df['SEM_TRADING_SYMBOL'].str.contains(base, case=False, na=False)))]
+            
+            if match.empty:
+                print(f"⚠️ No strike {strike} found for {base}.")
+                return None, None
+            
+        elif symbol.endswith('-I'):
+            base = symbol.replace('-I', '')
+            match = df[(df['SEM_INSTRUMENT_NAME'].isin(['FUTIDX', 'FUTSTK'])) & 
+                       (df['SEM_TRADING_SYMBOL'].str.startswith(base)) &
+                       (df['SEM_EXM_EXCH_ID'] == 'NSE')]
+        else:
+            # Regular exact match
+            match = df[(df['SEM_TRADING_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
+            if match.empty:
+                match = df[(df['SEM_CUSTOM_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
+
+        if not match.empty:
+            # Sort by expiry to get the nearest one safely
+            match = match.copy()
+            if 'SEM_EXPIRY_DATE' in match.columns:
+                match['expiry_dt'] = pd.to_datetime(match['SEM_EXPIRY_DATE'], errors='coerce')
+                match = match.dropna(subset=['expiry_dt']).sort_values('expiry_dt')
+            
+            # Use the first active match
+            row = match.iloc[0]
+            sec_id = int(row['SEM_SMST_SECURITY_ID'])
+            inst_name = str(row['SEM_INSTRUMENT_NAME'])
+            final_symbol = str(row['SEM_TRADING_SYMBOL'])
+            expiry = str(row['SEM_EXPIRY_DATE'])
+            
+            print(f"✅ Found: {final_symbol} | ID: {sec_id} | Expiry: {expiry}")
+            return sec_id, inst_name
+        else:
+            print(f"❌ Symbol {symbol} not found.")
+            return None, None
     except Exception as e:
-        print(f"⚠️ Search Error: {str(e)}")
-        return None
+        print(f"Lookup Error: {e}")
+        return None, None
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    data = request.get_json(force=True, silent=True)
+    
+    if not data or data.get('secret') != SECRET_TOKEN:
+        print(f"🔴 403 ERROR! Unauthorized request.")
+        return jsonify({"status": "error", "remarks": "Unauthorized"}), 403
+
+    symbol = data.get('symbol')
+    price = float(data.get('price', 0))
+    option_type = data.get('option_type', 'CE').upper()
+    manual_strike = data.get('itm_strike')
+
+    # 1. Resolve exact Security ID and Instrument Type
+    sec_id, inst_name = get_security_id(symbol, price, option_type, manual_strike)
+    
+    if not sec_id:
+        return jsonify({"status": "error", "remarks": "Symbol not found"}), 400
+
+    # 2. FORCE CORRECT SEGMENT (The Permanent Fix)
+    if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK']:
+        exch_seg = dhan.NSE_FNO
+    else:
+        exch_seg = dhan.NSE
+
+    # Handle Order Type and Price logic - PRECISE LTP VERSION
+    order_type_str = data.get('order_type', 'MARKET').upper()
+    side_str = data.get('side', 'BUY').upper()
+    
     try:
-        data = request.get_json(force=True, silent=True)
-        if not data: return jsonify({"error": "No JSON"}), 400
-        print(f"\n📥 Signal: {data}")
+        final_price = 0.0
+        dhan_order_type = dhan.MARKET
 
-        if data.get('secret') != SECRET_TOKEN:
-            return jsonify({"error": "Auth Fail"}), 403
+        # 1. Fetch LTP for Market orders - VERSION 2.2.0 TICKER PATTERN
+        if order_type_str == 'MARKET':
+            print(f"🔍 Fetching Precise LTP for {sec_id}...")
+            try:
+                # Version 2.2.0 requires a dictionary of lists
+                seg_key = "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE"
+                securities = {seg_key: [int(sec_id)]}
+                
+                quote = dhan.ticker_data(securities)
+                print(f"📊 Raw Ticker Response: {quote}")
+                
+                # Extracting LTP from Version 2.2.0 structure (Exact Match to Logs)
+                if isinstance(quote, dict) and quote.get('status') == 'success':
+                    outer_data = quote.get('data', {})
+                    inner_data = outer_data.get('data', {}) # Logs show nested 'data'
+                    seg_data = inner_data.get(seg_key, {})
+                    id_data = seg_data.get(str(sec_id), {})
+                    
+                    # Log shows 'last_price'
+                    ltp = float(id_data.get('last_price', 0))
+                    
+                    if ltp > 0:
+                        final_price = ltp
+                        dhan_order_type = dhan.LIMIT
+                        print(f"🎯 LTP Found: {final_price}. Placing Precise LIMIT order.")
+                
+                if final_price == 0:
+                    print(f"⚠️ LTP Fetch failed or zero. Data: {quote}")
+                    print("⚠️ Falling back to Standard Market Order.")
+            except Exception as e:
+                print(f"⚠️ LTP Fetch Error: {e}. Falling back to Standard Market Order.")
+        else:
+            dhan_order_type = dhan.LIMIT
+            final_price = float(data.get('price', 0))
 
-        if data.get('action') == 'exit':
-            print("🛑 EXIT ALL POSITIONS")
-            pos_res = dhan.get_positions()
-            if pos_res.get('status') == 'success':
-                for pos in pos_res.get('data', []):
-                    qty = int(pos.get('netQty', 0))
-                    if qty != 0:
-                        dhan.place_order(
-                            security_id=str(pos.get('securityId')),
-                            exchange_segment=pos.get('exchangeSegment'),
-                            transaction_type=dhan.SELL if qty > 0 else dhan.BUY,
-                            quantity=abs(qty),
-                            order_type=dhan.MARKET,
-                            product_type=pos.get('productType'),
-                            price=0, trigger_price=0, validity=dhan.DAY
-                        )
-                return jsonify({"status": "success"}), 200
-            return jsonify({"error": "Pos Fail"}), 500
-
-        # ENTRY
-        symbol = data.get('symbol', 'BANKNIFTY-ATM')
-        price = float(data.get('price', 0))
-        opt_type = data.get('option_type', 'CE').upper()
-        quantity = int(data.get('quantity', 300))
-
-        sec_id = get_security_id(symbol, price, opt_type)
-        if not sec_id: return jsonify({"error": "NotFound"}), 404
-
-        # Place Order
-        order_res = dhan.place_order(
-            security_id=sec_id,
-            exchange_segment=dhan.FNO,
-            transaction_type=dhan.BUY,
-            quantity=quantity,
-            order_type=dhan.MARKET,
-            product_type=dhan.MARGIN,
-            price=0, trigger_price=0, validity=dhan.DAY,
-            after_market_order=False
+        # 2. Place order using strictly verified params
+        response = dhan.place_order(
+            security_id=int(sec_id), # Pure Integer
+            exchange_segment=exch_seg,
+            transaction_type=dhan.BUY if side_str == 'BUY' else dhan.SELL,
+            quantity=int(data.get('quantity', 0)),
+            order_type=dhan_order_type,
+            product_type=dhan.INTRA,
+            price=float(final_price),
+            after_market_order=False 
         )
-        print(f"📡 Response: {order_res}")
-        return jsonify(order_res), 200
+        
+        print(f"📡 Dhan API Order Response: {response}")
+        return jsonify(response), 200
 
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"❌ Order Execution Error:\n{error_details}")
+        return jsonify({"error": str(e), "details": error_details}), 500
 
 if __name__ == '__main__':
+    # Listen on all public IPs on port 80 (standard HTTP port)
     app.run(host='0.0.0.0', port=80)
