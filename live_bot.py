@@ -147,7 +147,7 @@ def webhook():
             transaction_type=dhan.BUY if side_str == 'BUY' else dhan.SELL,
             quantity=int(data.get('quantity', 0)),
             order_type=dhan_order_type,
-            product_type=dhan.INTRA,
+            product_type=dhan.MARGIN, # Changed to MARGIN (Normal) to allow pure Market orders
             price=float(final_price),
             after_market_order=False 
         )
