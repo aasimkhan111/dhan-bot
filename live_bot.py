@@ -133,43 +133,12 @@ def webhook():
     side_str = data.get('side', 'BUY').upper()
     
     try:
-        final_price = 0.0
+        # We always use MARKET order for Options to ensure immediate execution 
+        # and prevent orders from getting stuck due to delayed API price data.
         dhan_order_type = dhan.MARKET
-
-        # 1. Fetch LTP for Market orders - VERSION 2.2.0 TICKER PATTERN
-        if order_type_str == 'MARKET':
-            print(f"🔍 Fetching Precise LTP for {sec_id}...")
-            try:
-                # Version 2.2.0 requires a dictionary of lists
-                seg_key = "NSE_FNO" if exch_seg == dhan.NSE_FNO else "NSE"
-                securities = {seg_key: [int(sec_id)]}
-                
-                quote = dhan.ticker_data(securities)
-                print(f"📊 Raw Ticker Response: {quote}")
-                
-                # Extracting LTP from Version 2.2.0 structure (Exact Match to Logs)
-                if isinstance(quote, dict) and quote.get('status') == 'success':
-                    outer_data = quote.get('data', {})
-                    inner_data = outer_data.get('data', {}) # Logs show nested 'data'
-                    seg_data = inner_data.get(seg_key, {})
-                    id_data = seg_data.get(str(sec_id), {})
-                    
-                    # Log shows 'last_price'
-                    ltp = float(id_data.get('last_price', 0))
-                    
-                    if ltp > 0:
-                        final_price = ltp
-                        dhan_order_type = dhan.LIMIT
-                        print(f"🎯 LTP Found: {final_price}. Placing Precise LIMIT order.")
-                
-                if final_price == 0:
-                    print(f"⚠️ LTP Fetch failed or zero. Data: {quote}")
-                    print("⚠️ Falling back to Standard Market Order.")
-            except Exception as e:
-                print(f"⚠️ LTP Fetch Error: {e}. Falling back to Standard Market Order.")
-        else:
-            dhan_order_type = dhan.LIMIT
-            final_price = float(data.get('price', 0))
+        final_price = 0.0
+        
+        print(f"🚀 Firing MARKET order for ID: {sec_id}")
 
         # 2. Place order using strictly verified params
         response = dhan.place_order(

@@ -1,20 +1,25 @@
 import requests
 
-# This is the address of your bot running on your laptop
-URL = "http://127.0.0.1:5000/webhook"
+# 🚨 YAHAN APNE NAYE EC2 SERVER KA IP DALO 🚨
+EC2_IP = "43.205.136.79"  # <-- Ise change karo
 
-# This mimics the JSON TradingView would send
+URL = f"http://{EC2_IP}:80/webhook"
+
+# Fake TradingView Alert (BankNifty ITM CE)
 payload = {
     "secret": "JunnarTrader2026",
-    "symbol": "BANKNIFTY-Jun2026-65400-CE",  
+    "symbol": "BANKNIFTY-ITM",  
     "side": "buy",
-    "quantity": 30, # (June 2026 Lot Size is 30)
-    "order_type": "LIMIT", # Tell the bot it's a Limit Order
-    "price": 0.10          # Place a dummy limit order price
+    "quantity": 60,
+    "order_type": "MARKET",
+    "price": 56000.0,  # Fake BankNifty Price
+    "option_type": "CE"
 }
 
-
-
-response = requests.post(URL, json=payload)
-print(f"Status Code: {response.status_code}")
-print(f"Response from Bot: {response.json()}")
+print(f"Sending fake signal to {URL}...")
+try:
+    response = requests.post(URL, json=payload, timeout=10)
+    print(f"Status Code: {response.status_code}")
+    print(f"Response from EC2 Bot: {response.json()}")
+except Exception as e:
+    print(f"Error connecting to server: {e}")
