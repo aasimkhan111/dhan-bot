@@ -1,7 +1,7 @@
 import requests
 
 # 🚨 YAHAN APNE NAYE EC2 SERVER KA IP DALO 🚨
-EC2_IP = "43.205.136.79"  # <-- Ise change karo
+EC2_IP = "65.0.80.107"  # <-- Ise change karo
 
 URL = f"http://{EC2_IP}:80/webhook"
 
