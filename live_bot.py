@@ -40,15 +40,55 @@ def save_config(config_data):
         print(f"❌ Error saving config.json: {e}")
         return False
 
+def run_and_log_command(cmd_args, cwd=None):
+    try:
+        print(f"💻 Executing: {' '.join(cmd_args)}")
+        result = subprocess.run(cmd_args, cwd=cwd, capture_output=True, text=True, check=True)
+        if result.stdout:
+            print(f"Stdout:\n{result.stdout}")
+        if result.stderr:
+            print(f"Stderr:\n{result.stderr}")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed executing: {' '.join(cmd_args)}")
+        if e.stdout:
+            print(f"Stdout:\n{e.stdout}")
+        if e.stderr:
+            print(f"Stderr:\n{e.stderr}")
+        return False
+    except Exception as ex:
+        print(f"❌ Execution error: {ex}")
+        return False
+
 def sync_to_git():
+    config = load_config()
     try:
         print("🔄 Automatically syncing configuration to GitHub...")
-        # Check if it is a git repository
         if os.path.exists(".git"):
-            subprocess.run(["git", "add", "config.json"], check=True)
-            subprocess.run(["git", "commit", "-m", "Auto-update credentials via Admin Dashboard"], check=True)
-            subprocess.run(["git", "push"], check=True)
-            print("✅ Successfully pushed updated configuration to GitHub!")
+            run_and_log_command(["git", "add", "config.json"])
+            run_and_log_command(["git", "commit", "-m", "Auto-update credentials via Admin Dashboard"])
+            push_success = run_and_log_command(["git", "push"])
+            
+            if push_success:
+                print("✅ Successfully pushed updated configuration to GitHub!")
+                
+                # If we are on local machine (Windows), we also trigger EC2 sync
+                if os.name == 'nt':
+                    import requests
+                    EC2_IP = "65.0.80.107"
+                    print(f"🌐 Running locally (Windows). Triggering Git Pull and Reload on EC2 Server ({EC2_IP})...")
+                    try:
+                        url = f"http://{EC2_IP}/api/git-pull-and-reload"
+                        payload = {"secret": config.get('SECRET_TOKEN', 'JunnarTrader2026')}
+                        response = requests.post(url, json=payload, timeout=15)
+                        if response.status_code == 200:
+                            print("🎉 EC2 Server successfully pulled changes and reloaded credentials!")
+                        else:
+                            print(f"⚠️ EC2 Server sync failed: {response.text}")
+                    except Exception as e:
+                        print(f"⚠️ Could not contact EC2 server: {e}")
+            else:
+                print("❌ Git push failed. Skipping EC2 remote pull.")
         else:
             print("⚠️ Not a git repository, skipping push.")
     except Exception as e:
@@ -840,6 +880,27 @@ def api_get_logs():
         return jsonify({"logs": "Log file not found yet. Generate logs by firing webhook alerts!"}), 200
     except Exception as e:
         return jsonify({"logs": f"Error reading logs: {e}"}), 500
+
+@app.route('/api/git-pull-and-reload', methods=['POST'])
+def api_pull_and_reload():
+    data = request.get_json(force=True, silent=True) or {}
+    config = load_config()
+    
+    # Authorize with Secret Token
+    if data.get('secret') != config.get('SECRET_TOKEN', 'JunnarTrader2026'):
+        print("🔴 Unauthorized remote sync attempt!")
+        return jsonify({"status": "error", "remarks": "Unauthorized"}), 403
+    
+    print("📥 Received remote sync request from Local Dashboard...")
+    
+    # Run git pull
+    success = run_and_log_command(["git", "pull", "origin", "main"])
+    if success:
+        print("✅ Git Pull completed on EC2! Reloading new credentials...")
+        return jsonify({"status": "success", "message": "Git pull and configuration reload completed on EC2!"}), 200
+    else:
+        print("❌ Git pull failed on EC2.")
+        return jsonify({"status": "failed", "message": "Git pull failed on EC2."}), 500
 
 if __name__ == '__main__':
     # Initialize global default client fallback from config
