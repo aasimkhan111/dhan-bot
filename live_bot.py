@@ -284,10 +284,13 @@ def webhook():
         
         print(f"📡 Dhan API Order Response: {response}")
         return jsonify(response), 200
+
     except Exception as e:
         error_details = traceback.format_exc()
         print(f"❌ Order Execution Error:\n{error_details}")
         return jsonify({"error": str(e), "details": error_details}), 500
+
+# --- FRONTEND ROUTE & API ---
 
 @app.route('/')
 def admin_dashboard():
@@ -302,16 +305,17 @@ def admin_dashboard():
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Fira+Code:wght@400;500&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
         <style>
             :root {
-                --bg-main: #f8fafc;
-                --card-glass: rgba(255, 255, 255, 0.7);
-                --primary: #4f46e5;
-                --secondary: #0ea5e9;
-                --accent: #8b5cf6;
-                --text-main: #0f172a;
-                --text-dim: #64748b;
+                --bg-deep: #03050a;
+                --card-glass: rgba(13, 17, 28, 0.7);
+                --border-glow: rgba(121, 40, 202, 0.3);
+                --primary: #7928CA;
+                --secondary: #00DFD8;
+                --accent: #FF007A;
+                --text-main: #f8fafc;
+                --text-dim: #94a3b8;
                 --success: #10b981;
                 --error: #ef4444;
-                --panel-shadow: 0 20px 40px rgba(0, 0, 0, 0.05);
+                --panel-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
             }
 
             * {
@@ -322,10 +326,11 @@ def admin_dashboard():
             }
 
             body {
-                background-color: var(--bg-main);
+                background-color: var(--bg-deep);
                 background-image: 
-                    radial-gradient(circle at 10% 20%, rgba(79, 70, 229, 0.05) 0%, transparent 40%),
-                    radial-gradient(circle at 90% 80%, rgba(14, 165, 233, 0.05) 0%, transparent 40%);
+                    radial-gradient(circle at 20% 30%, rgba(121, 40, 202, 0.15) 0%, transparent 40%),
+                    radial-gradient(circle at 80% 70%, rgba(0, 223, 216, 0.1) 0%, transparent 40%),
+                    linear-gradient(to bottom, transparent, rgba(0,0,0,0.5));
                 font-family: 'Inter', sans-serif;
                 color: var(--text-main);
                 min-height: 100vh;
@@ -334,13 +339,25 @@ def admin_dashboard():
                 align-items: center;
                 padding: 3rem 1.5rem;
                 overflow-x: hidden;
+                position: relative;
+            }
+
+            /* Animated Background Particles */
+            body::before {
+                content: '';
+                position: fixed;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: url('https://www.transparenttextures.com/patterns/stardust.png');
+                opacity: 0.2;
+                z-index: -2;
+                pointer-events: none;
             }
 
             header {
                 text-align: center;
                 margin-bottom: 4rem;
                 z-index: 10;
-                animation: fadeInDown 0.8s ease-out;
+                animation: fadeInDown 1s ease-out;
             }
 
             @keyframes fadeInDown {
@@ -353,10 +370,11 @@ def admin_dashboard():
                 font-size: 3.5rem;
                 font-weight: 800;
                 letter-spacing: -0.06em;
-                background: linear-gradient(135deg, var(--text-main) 20%, var(--primary) 100%);
+                background: linear-gradient(135deg, #fff 20%, var(--secondary) 50%, var(--primary) 100%);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 margin-bottom: 0.2rem;
+                filter: drop-shadow(0 0 20px rgba(121, 40, 202, 0.3));
             }
 
             header p {
@@ -366,6 +384,7 @@ def admin_dashboard():
                 font-weight: 400;
                 letter-spacing: 0.2em;
                 text-transform: uppercase;
+                opacity: 0.8;
             }
 
             .status-container {
@@ -376,14 +395,15 @@ def admin_dashboard():
                 display: inline-flex;
                 align-items: center;
                 gap: 0.6rem;
-                background: #fff;
+                background: rgba(16, 185, 129, 0.05);
                 border: 1px solid rgba(16, 185, 129, 0.2);
                 padding: 0.5rem 1.2rem;
                 border-radius: 100px;
                 font-size: 0.85rem;
                 color: var(--success);
                 font-weight: 600;
-                box-shadow: 0 4px 12px rgba(16, 185, 129, 0.1);
+                letter-spacing: 0.05em;
+                box-shadow: 0 0 20px rgba(16, 185, 129, 0.1);
             }
 
             .status-badge::before {
@@ -392,13 +412,14 @@ def admin_dashboard():
                 height: 10px;
                 background: var(--success);
                 border-radius: 50%;
+                box-shadow: 0 0 12px var(--success);
                 animation: pulseGlow 2s infinite;
             }
 
             @keyframes pulseGlow {
-                0% { transform: scale(0.9); opacity: 0.5; }
-                70% { transform: scale(1.1); opacity: 1; }
-                100% { transform: scale(0.9); opacity: 0.5; }
+                0% { transform: scale(0.9); opacity: 0.5; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+                70% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+                100% { transform: scale(0.9); opacity: 0.5; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
             }
 
             .main-container {
@@ -408,7 +429,7 @@ def admin_dashboard():
                 width: 100%;
                 max-width: 1200px;
                 z-index: 10;
-                animation: fadeInUp 0.8s ease-out 0.2s both;
+                animation: fadeInUp 1s ease-out 0.2s both;
             }
 
             @keyframes fadeInUp {
@@ -422,21 +443,37 @@ def admin_dashboard():
                 }
             }
 
+            /* Futuristic Glass Card */
             .card {
                 background: var(--card-glass);
-                border: 1px solid rgba(255, 255, 255, 0.8);
+                border: 1px solid var(--card-border);
                 border-radius: 24px;
                 padding: 2.5rem;
-                backdrop-filter: blur(12px);
-                -webkit-backdrop-filter: blur(12px);
+                backdrop-filter: blur(20px);
+                -webkit-backdrop-filter: blur(20px);
                 box-shadow: var(--panel-shadow);
+                position: relative;
+                overflow: hidden;
                 transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             }
 
+            .card::after {
+                content: '';
+                position: absolute;
+                top: 0; left: 0; width: 100%; height: 2px;
+                background: linear-gradient(90deg, transparent, var(--secondary), transparent);
+                opacity: 0;
+                transition: opacity 0.4s;
+            }
+
             .card:hover {
+                border-color: rgba(0, 223, 216, 0.3);
                 transform: translateY(-5px);
-                box-shadow: 0 30px 60px rgba(0, 0, 0, 0.08);
-                border-color: var(--primary);
+                box-shadow: 0 30px 60px rgba(0, 0, 0, 0.7);
+            }
+
+            .card:hover::after {
+                opacity: 1;
             }
 
             .card-title {
@@ -447,13 +484,15 @@ def admin_dashboard():
                 display: flex;
                 align-items: center;
                 gap: 1rem;
-                color: var(--text-main);
+                color: #fff;
             }
 
             .card-title svg {
-                color: var(--primary);
+                color: var(--secondary);
+                filter: drop-shadow(0 0 8px var(--secondary));
             }
 
+            /* Form Elements */
             .form-group {
                 margin-bottom: 1.8rem;
             }
@@ -468,23 +507,32 @@ def admin_dashboard():
                 letter-spacing: 0.15em;
             }
 
+            .input-wrapper {
+                position: relative;
+            }
+
             .form-group input {
                 width: 100%;
-                background: #fff;
-                border: 1px solid #e2e8f0;
+                background: rgba(0, 0, 0, 0.4);
+                border: 1px solid var(--card-border);
                 border-radius: 14px;
                 padding: 1.1rem 1.2rem;
                 font-family: 'Inter', sans-serif;
                 font-size: 1rem;
-                color: var(--text-main);
+                color: #fff;
                 transition: all 0.3s ease;
                 outline: none;
                 cursor: text;
             }
 
             .form-group input:focus {
-                border-color: var(--primary);
-                box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
+                border-color: var(--secondary);
+                background: rgba(0, 223, 216, 0.03);
+                box-shadow: 0 0 20px rgba(0, 223, 216, 0.1);
+            }
+
+            .form-group input::placeholder {
+                color: #475569;
             }
 
             .btn-container {
@@ -502,45 +550,62 @@ def admin_dashboard():
                 border: none;
                 border-radius: 14px;
                 cursor: pointer;
-                transition: all 0.3s ease;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 gap: 0.7rem;
+                position: relative;
+                overflow: hidden;
+                z-index: 1;
+            }
+
+            button::before {
+                content: '';
+                position: absolute;
+                top: 0; left: -100%; width: 100%; height: 100%;
+                background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+                transition: left 0.5s;
+                z-index: -1;
+            }
+
+            button:hover::before {
+                left: 100%;
+            }
+
+            button:active {
+                transform: scale(0.96);
             }
 
             .btn-primary {
-                background: var(--primary);
+                background: linear-gradient(135deg, var(--primary) 0%, #4c1d95 100%);
                 color: #fff;
-                box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+                box-shadow: 0 10px 25px rgba(121, 40, 202, 0.3);
             }
 
             .btn-primary:hover {
-                background: #4338ca;
-                box-shadow: 0 8px 20px rgba(79, 70, 229, 0.4);
+                box-shadow: 0 15px 35px rgba(121, 40, 202, 0.5);
+                filter: brightness(1.1);
             }
 
             .btn-secondary {
-                background: #fff;
+                background: rgba(255, 255, 255, 0.03);
                 color: var(--text-main);
-                border: 1px solid #e2e8f0;
+                border: 1px solid var(--card-border);
+                backdrop-filter: blur(10px);
             }
 
             .btn-secondary:hover {
-                background: #f8fafc;
+                background: rgba(255, 255, 255, 0.08);
                 border-color: var(--text-dim);
             }
 
+            /* Terminal Aesthetic */
             .console-card {
                 display: flex;
                 flex-direction: column;
                 height: 100%;
-                background: #1e293b; /* Maintain dark console for tech contrast */
-                color: #e2e8f0;
-            }
-
-            .console-card .card-title {
-                color: #fff;
+                border: 1px solid rgba(0, 223, 216, 0.15);
             }
 
             .console-header {
@@ -554,32 +619,44 @@ def admin_dashboard():
 
             .console-area {
                 flex-grow: 1;
-                background: #0f172a;
+                background: #020408;
                 border-radius: 16px;
                 padding: 1.5rem;
                 font-family: 'Fira Code', monospace;
                 font-size: 0.85rem;
                 line-height: 1.6;
-                color: #38bdf8;
+                color: #a5f3fc;
                 overflow-y: auto;
                 max-height: 480px;
                 white-space: pre-wrap;
+                box-shadow: inset 0 4px 20px rgba(0,0,0,0.8);
+                border: 1px solid rgba(255,255,255,0.03);
             }
 
+            .console-area::-webkit-scrollbar {
+                width: 5px;
+            }
+            .console-area::-webkit-scrollbar-thumb {
+                background: rgba(0, 223, 216, 0.2);
+                border-radius: 10px;
+            }
+
+            /* Custom Toasts */
             .toast {
                 position: fixed;
                 bottom: 2.5rem;
                 right: 2.5rem;
-                background: #fff;
-                border: 1px solid #e2e8f0;
+                background: rgba(13, 17, 28, 0.95);
+                backdrop-filter: blur(20px);
+                border: 1px solid var(--card-border);
                 padding: 1.2rem 2rem;
                 border-radius: 16px;
-                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+                box-shadow: 0 20px 40px rgba(0,0,0,0.4);
                 display: flex;
                 align-items: center;
                 gap: 1rem;
                 transform: translateX(200%);
-                transition: transform 0.4s ease;
+                transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
                 z-index: 1000;
             }
 
@@ -587,10 +664,28 @@ def admin_dashboard():
             .toast-success { border-left: 4px solid var(--success); }
             .toast-error { border-left: 4px solid var(--error); }
 
+            .loader-dots {
+                display: inline-flex;
+                gap: 4px;
+            }
+            .loader-dots span {
+                width: 4px; height: 4px;
+                background: currentColor;
+                border-radius: 50%;
+                animation: dotBlink 1.4s infinite;
+            }
+            .loader-dots span:nth-child(2) { animation-delay: 0.2s; }
+            .loader-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+            @keyframes dotBlink {
+                0%, 80%, 100% { opacity: 0; }
+                40% { opacity: 1; }
+            }
+
             .spinner {
                 width: 20px; height: 20px;
-                border: 2px solid rgba(0,0,0,0.1);
-                border-top-color: currentColor;
+                border: 2px solid rgba(255,255,255,0.2);
+                border-top-color: #fff;
                 border-radius: 50%;
                 animation: spin 0.8s linear infinite;
                 display: none;
@@ -603,6 +698,78 @@ def admin_dashboard():
                 color: var(--text-dim);
                 font-size: 0.85rem;
                 text-align: center;
+                letter-spacing: 0.05em;
+            }
+
+            /* Safety Toggle Styling */
+            .toggle-container {
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                margin-bottom: 2rem;
+                padding: 1rem;
+                background: rgba(255, 255, 255, 0.03);
+                border-radius: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.05);
+            }
+
+            .toggle-label {
+                font-size: 0.85rem;
+                font-weight: 600;
+                color: var(--text-dim);
+                flex-grow: 1;
+            }
+
+            .switch {
+                position: relative;
+                display: inline-block;
+                width: 44px;
+                height: 24px;
+            }
+
+            .switch input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+
+            .slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background-color: rgba(255, 255, 255, 0.1);
+                transition: .4s;
+                border-radius: 34px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+
+            .slider:before {
+                position: absolute;
+                content: "";
+                height: 16px;
+                width: 16px;
+                left: 3px;
+                bottom: 3px;
+                background-color: var(--text-dim);
+                transition: .4s;
+                border-radius: 50%;
+            }
+
+            input:checked + .slider {
+                background-color: rgba(121, 40, 202, 0.2);
+                border-color: var(--primary);
+            }
+
+            input:checked + .slider:before {
+                transform: translateX(20px);
+                background-color: var(--secondary);
+                box-shadow: 0 0 10px var(--secondary);
+            }
+
+            input:readonly {
+                opacity: 0.6;
+                background: rgba(255, 255, 255, 0.02) !important;
+                border-style: dashed !important;
             }
         </style>
     </head>
@@ -616,10 +783,19 @@ def admin_dashboard():
         </header>
 
         <div class="main-container">
+            <!-- Configuration Settings -->
             <div class="card">
                 <div class="card-title">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                     Command Center
+                </div>
+
+                <div class="toggle-container">
+                    <span class="toggle-label">Vault Protection (Client ID & Secret)</span>
+                    <label class="switch">
+                        <input type="checkbox" id="safety-toggle" checked onchange="toggleProtection()">
+                        <span class="slider"></span>
+                    </label>
                 </div>
                 
                 <form id="config-form" onsubmit="saveConfig(event)">
@@ -651,14 +827,20 @@ def admin_dashboard():
                 </form>
             </div>
 
+            <!-- Live Monitoring Terminal -->
             <div class="card console-card">
                 <div class="console-header">
                     <div class="card-title" style="margin-bottom: 0;">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
                         Neural Log Stream
                     </div>
+                    <div style="display: flex; gap: 6px;">
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: #ef4444; opacity: 0.6;"></span>
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; opacity: 0.6;"></span>
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: #10b981; opacity: 0.6;"></span>
+                    </div>
                 </div>
-                <div class="console-area" id="terminal-logs">Establishing link...</div>
+                <div class="console-area" id="terminal-logs">Establishing link to neural stream...</div>
             </div>
         </div>
 
@@ -687,8 +869,26 @@ def admin_dashboard():
                     document.getElementById('client-id').value = data.CLIENT_ID || '';
                     document.getElementById('access-token').value = data.ACCESS_TOKEN || '';
                     document.getElementById('secret-token').value = data.SECRET_TOKEN || '';
+                    toggleProtection(); // Apply protection based on toggle default
                 } catch (e) {
-                    showToast('Sync failed.', 'error');
+                    showToast('Failed to sync vault.', 'error');
+                }
+            }
+
+            function toggleProtection() {
+                const isLocked = document.getElementById('safety-toggle').checked;
+                const clientId = document.getElementById('client-id');
+                const secretToken = document.getElementById('secret-token');
+                
+                clientId.readOnly = isLocked;
+                secretToken.readOnly = isLocked;
+                
+                if(isLocked) {
+                    clientId.title = "Vault Locked - Disable protection to edit";
+                    secretToken.title = "Vault Locked - Disable protection to edit";
+                } else {
+                    clientId.title = "";
+                    secretToken.title = "";
                 }
             }
 
@@ -697,28 +897,42 @@ def admin_dashboard():
                 const saveSpinner = document.getElementById('save-spinner');
                 const saveBtnText = document.getElementById('save-btn-text');
                 const logArea = document.getElementById('terminal-logs');
+                
                 saveSpinner.style.display = 'block';
                 saveBtnText.innerText = 'Syncing...';
-                logArea.innerHTML = `<span style="color:#38bdf8">INITIALIZING DEPLOYMENT...</span>\\n`;
+
+                const now = new Date().toLocaleTimeString();
+                logArea.innerHTML = `<span style="color:var(--secondary)">[${now}]</span> 🚀 <span style="color:#fff; font-weight:bold;">INITIALIZING QUANT DEPLOYMENT...</span>\\n`;
+                logArea.innerHTML += `<span style="color:#64748b">---------------------------------------------------</span>\\n`;
+                logArea.scrollTop = logArea.scrollHeight;
+
+                const payload = {
+                    CLIENT_ID: document.getElementById('client-id').value.trim(),
+                    ACCESS_TOKEN: document.getElementById('access-token').value.trim(),
+                    SECRET_TOKEN: document.getElementById('secret-token').value.trim()
+                };
 
                 try {
                     const res = await fetch('/api/config', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            CLIENT_ID: document.getElementById('client-id').value.trim(),
-                            ACCESS_TOKEN: document.getElementById('access-token').value.trim(),
-                            SECRET_TOKEN: document.getElementById('secret-token').value.trim()
-                        })
+                        body: JSON.stringify(payload)
                     });
                     const result = await res.json();
+                    
                     if(result.pipeline) {
-                        let text = '';
+                        let text = logArea.innerHTML;
                         result.pipeline.forEach((step, i) => {
                             const icon = step.status === 'success' ? '✅' : '❌';
-                            text += `${icon} Step ${i+1}: ${step.step}\\n   ↳ ${step.detail}\\n\\n`;
+                            const color = step.status === 'success' ? 'var(--success)' : 'var(--error)';
+                            text += `<span style="color:${color}">${icon} Step ${i+1}: ${step.step}</span>\\n`;
+                            text += `   <span style="color:#64748b">↳ ${step.detail}</span>\\n\\n`;
                         });
+                        const endTime = new Date().toLocaleTimeString();
+                        text += `<span style="color:#64748b">---------------------------------------------------</span>\\n`;
+                        text += `<span style="color:var(--secondary)">[${endTime}]</span> 🎉 <span style="color:#fff;">QUANT SYSTEMS SECURED & DEPLOYED.</span>`;
                         logArea.innerHTML = text;
+                        logArea.scrollTop = logArea.scrollHeight;
                         showToast('Deployment Successful', 'success');
                     }
                 } catch(err) {
@@ -745,9 +959,9 @@ def admin_dashboard():
                     });
                     const result = await res.json();
                     if(result.status === 'success') {
-                        showToast('Verified. Balance: ₹' + result.balance, 'success');
+                        showToast('Auth verified. Balance: ₹' + result.balance, 'success');
                     } else {
-                        showToast('Denied: ' + result.error, 'error');
+                        showToast('Auth denied: ' + result.error, 'error');
                     }
                 } catch(err) {
                     showToast('Link error.', 'error');
@@ -762,13 +976,18 @@ def admin_dashboard():
                     const res = await fetch('/api/logs');
                     const data = await res.json();
                     const logArea = document.getElementById('terminal-logs');
-                    if(data.logs) logArea.innerText = data.logs;
-                    logArea.scrollTop = logArea.scrollHeight;
+                    const isScrolledToBottom = logArea.scrollHeight - logArea.clientHeight <= logArea.scrollTop + 50;
+                    if(data.logs) {
+                        // Minimal formatting for logs
+                        logArea.innerText = data.logs;
+                    }
+                    if (isScrolledToBottom) logArea.scrollTop = logArea.scrollHeight;
                 } catch(e) {}
             }
 
             window.onload = () => {
                 fetchConfig();
+                fetchLogs();
                 setInterval(fetchLogs, 2000);
             };
         </script>
