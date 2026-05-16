@@ -27,72 +27,97 @@ def load_config():
         "SECRET_TOKEN": "JunnarTrader2026"
     }
 
-def save_config(config_data):
+EC2_IP = "65.0.80.107"
+
+def run_and_log_command(cmd_args, cwd=None):
+    """Execute a shell command, log its output, and return (success, output_text)."""
+    try:
+        cmd_str = ' '.join(cmd_args)
+        print(f"💻 Executing: {cmd_str}")
+        result = subprocess.run(cmd_args, cwd=cwd, capture_output=True, text=True, check=True)
+        output = ""
+        if result.stdout:
+            output += result.stdout.strip()
+            print(f"   ↳ {result.stdout.strip()}")
+        if result.stderr:
+            output += result.stderr.strip()
+            print(f"   ↳ {result.stderr.strip()}")
+        return True, output
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed: {' '.join(cmd_args)}")
+        err_out = ""
+        if e.stdout:
+            err_out += e.stdout.strip()
+            print(f"   ↳ {e.stdout.strip()}")
+        if e.stderr:
+            err_out += e.stderr.strip()
+            print(f"   ↳ {e.stderr.strip()}")
+        return False, err_out
+    except Exception as ex:
+        print(f"❌ Execution error: {ex}")
+        return False, str(ex)
+
+def save_and_deploy(config_data):
+    """Save config, push to GitHub, and sync EC2. Returns pipeline steps."""
+    steps = []
+    
+    # ── STEP 1: Save config.json locally ──
     try:
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config_data, f, indent=4)
-        print("💾 Configuration updated successfully!")
-        
-        # Automatically commit and push to Git in background to keep in sync
-        sync_to_git()
-        return True
+        print("💾 [Step 1/4] Configuration saved to config.json")
+        steps.append({"step": "Save config.json", "status": "success", "detail": "Credentials written to disk"})
     except Exception as e:
-        print(f"❌ Error saving config.json: {e}")
-        return False
-
-def run_and_log_command(cmd_args, cwd=None):
-    try:
-        print(f"💻 Executing: {' '.join(cmd_args)}")
-        result = subprocess.run(cmd_args, cwd=cwd, capture_output=True, text=True, check=True)
-        if result.stdout:
-            print(f"Stdout:\n{result.stdout}")
-        if result.stderr:
-            print(f"Stderr:\n{result.stderr}")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Failed executing: {' '.join(cmd_args)}")
-        if e.stdout:
-            print(f"Stdout:\n{e.stdout}")
-        if e.stderr:
-            print(f"Stderr:\n{e.stderr}")
-        return False
-    except Exception as ex:
-        print(f"❌ Execution error: {ex}")
-        return False
-
-def sync_to_git():
-    config = load_config()
-    try:
-        print("🔄 Automatically syncing configuration to GitHub...")
-        if os.path.exists(".git"):
-            run_and_log_command(["git", "add", "config.json"])
-            run_and_log_command(["git", "commit", "-m", "Auto-update credentials via Admin Dashboard"])
-            push_success = run_and_log_command(["git", "push"])
-            
-            if push_success:
-                print("✅ Successfully pushed updated configuration to GitHub!")
-                
-                # If we are on local machine (Windows), we also trigger EC2 sync
-                if os.name == 'nt':
-                    import requests
-                    EC2_IP = "65.0.80.107"
-                    print(f"🌐 Running locally (Windows). Triggering Git Pull and Reload on EC2 Server ({EC2_IP})...")
-                    try:
-                        url = f"http://{EC2_IP}/api/git-pull-and-reload"
-                        payload = {"secret": config.get('SECRET_TOKEN', 'JunnarTrader2026')}
-                        response = requests.post(url, json=payload, timeout=15)
-                        if response.status_code == 200:
-                            print("🎉 EC2 Server successfully pulled changes and reloaded credentials!")
-                        else:
-                            print(f"⚠️ EC2 Server sync failed: {response.text}")
-                    except Exception as e:
-                        print(f"⚠️ Could not contact EC2 server: {e}")
-            else:
-                print("❌ Git push failed. Skipping EC2 remote pull.")
+        print(f"❌ [Step 1/4] Failed to save config.json: {e}")
+        steps.append({"step": "Save config.json", "status": "failed", "detail": str(e)})
+        return steps  # Cannot continue without saving
+    
+    # ── STEP 2: Git Add + Commit ──
+    if os.path.exists(".git"):
+        print("📦 [Step 2/4] Staging and committing changes...")
+        ok_add, _ = run_and_log_command(["git", "add", "config.json"])
+        ok_commit, commit_out = run_and_log_command(["git", "commit", "-m", "Auto-update credentials via Admin Dashboard"])
+        if ok_add and ok_commit:
+            steps.append({"step": "Git Commit", "status": "success", "detail": commit_out or "Changes committed"})
         else:
-            print("⚠️ Not a git repository, skipping push.")
-    except Exception as e:
-        print(f"⚠️ Git Sync failed: {e}")
+            steps.append({"step": "Git Commit", "status": "warning", "detail": commit_out or "Nothing new to commit (token may be same)"})
+    else:
+        steps.append({"step": "Git Commit", "status": "skipped", "detail": "Not a git repository"})
+        return steps
+    
+    # ── STEP 3: Git Push to GitHub ──
+    print("🚀 [Step 3/4] Pushing to GitHub...")
+    ok_push, push_out = run_and_log_command(["git", "push"])
+    if ok_push:
+        steps.append({"step": "Git Push", "status": "success", "detail": push_out or "Pushed to origin/main"})
+    else:
+        steps.append({"step": "Git Push", "status": "failed", "detail": push_out or "Push failed"})
+        return steps
+    
+    # ── STEP 4: EC2 Sync ──
+    if os.name == 'nt':
+        # Running on LOCAL Windows → trigger remote EC2 pull
+        print(f"🌐 [Step 4/4] Triggering Git Pull on EC2 ({EC2_IP})...")
+        try:
+            import requests as req_lib
+            url = f"http://{EC2_IP}/api/git-pull-and-reload"
+            payload = {"secret": config_data.get('SECRET_TOKEN', 'JunnarTrader2026')}
+            resp = req_lib.post(url, json=payload, timeout=20)
+            if resp.status_code == 200:
+                print("🎉 [Step 4/4] EC2 Server pulled latest changes and reloaded!")
+                steps.append({"step": "EC2 Auto-Pull", "status": "success", "detail": "Server reloaded with new credentials"})
+            else:
+                print(f"⚠️ [Step 4/4] EC2 sync returned: {resp.text}")
+                steps.append({"step": "EC2 Auto-Pull", "status": "failed", "detail": resp.text})
+        except Exception as e:
+            print(f"⚠️ [Step 4/4] Could not contact EC2: {e}")
+            steps.append({"step": "EC2 Auto-Pull", "status": "failed", "detail": str(e)})
+    else:
+        # Running ON EC2 itself → config is already saved locally, no pull needed
+        print("✅ [Step 4/4] Running on EC2 — config already live on this server!")
+        steps.append({"step": "EC2 Live Reload", "status": "success", "detail": "Config applied instantly (running on EC2)"})
+    
+    return steps
 
 # Initial sync with Dhan Master Scrip List
 print("Syncing with Dhan Master Scrip List...")
@@ -717,14 +742,23 @@ def admin_dashboard():
                 }
             }
 
-            // Save & Sync Configuration
+            // Save & Sync Configuration with Live Pipeline
             async function saveConfig(e) {
                 e.preventDefault();
                 const saveSpinner = document.getElementById('save-spinner');
                 const saveBtnText = document.getElementById('save-btn-text');
+                const logArea = document.getElementById('terminal-logs');
                 
                 saveSpinner.style.display = 'block';
-                saveBtnText.innerText = 'Syncing...';
+                saveBtnText.innerText = 'Deploying...';
+
+                // Show live pipeline in console
+                const now = new Date().toLocaleTimeString();
+                logArea.innerText = `[${now}] ═══════════════════════════════════════\n`;
+                logArea.innerText += `[${now}] 🚀 DEPLOYMENT PIPELINE STARTED\n`;
+                logArea.innerText += `[${now}] ═══════════════════════════════════════\n\n`;
+                logArea.innerText += `⏳ Step 1/4: Saving config.json...\n`;
+                logArea.scrollTop = logArea.scrollHeight;
 
                 const payload = {
                     CLIENT_ID: document.getElementById('client-id').value.trim(),
@@ -740,13 +774,43 @@ def admin_dashboard():
                     });
                     const result = await res.json();
                     
-                    if(result.status === 'success') {
-                        showToast('Credentials updated & pushed to GitHub successfully!', 'success');
+                    // Render step-by-step pipeline results
+                    if(result.pipeline && result.pipeline.length > 0) {
+                        let pipelineText = '';
+                        let allSuccess = true;
+                        
+                        result.pipeline.forEach((step, i) => {
+                            const icon = step.status === 'success' ? '✅' : 
+                                         step.status === 'warning' ? '⚠️' : 
+                                         step.status === 'skipped' ? '⏭️' : '❌';
+                            pipelineText += `${icon} Step ${i+1}/4: ${step.step}\n`;
+                            pipelineText += `   ↳ ${step.detail}\n\n`;
+                            if(step.status === 'failed') allSuccess = false;
+                        });
+                        
+                        const endTime = new Date().toLocaleTimeString();
+                        pipelineText += `[${endTime}] ═══════════════════════════════════════\n`;
+                        pipelineText += allSuccess 
+                            ? `[${endTime}] 🎉 DEPLOYMENT COMPLETE — ALL SYSTEMS SYNCED\n`
+                            : `[${endTime}] ⚠️  DEPLOYMENT PARTIAL — CHECK STEPS ABOVE\n`;
+                        pipelineText += `[${endTime}] ═══════════════════════════════════════`;
+                        
+                        logArea.innerText = pipelineText;
+                        logArea.scrollTop = logArea.scrollHeight;
+                        
+                        if(allSuccess) {
+                            showToast('🎉 Full pipeline success! Config live on EC2.', 'success');
+                        } else {
+                            showToast('Partial deployment. Check console for details.', 'error');
+                        }
+                    } else if(result.status === 'success') {
+                        showToast('Credentials updated successfully!', 'success');
                     } else {
-                        showToast('Failed to save config: ' + result.remarks, 'error');
+                        showToast('Failed: ' + (result.remarks || 'Unknown error'), 'error');
                     }
                 } catch(err) {
-                    showToast('Network error while saving.', 'error');
+                    logArea.innerText += `\n❌ Network error: ${err.message}`;
+                    showToast('Network error while deploying.', 'error');
                 } finally {
                     saveSpinner.style.display = 'none';
                     saveBtnText.innerText = 'Push & Sync';
@@ -836,11 +900,9 @@ def api_config():
         if not data:
             return jsonify({"status": "failed", "remarks": "Invalid body"}), 400
         
-        success = save_config(data)
-        if success:
-            return jsonify({"status": "success"}), 200
-        else:
-            return jsonify({"status": "failed", "remarks": "Could not save values"}), 500
+        pipeline_steps = save_and_deploy(data)
+        all_ok = all(s['status'] in ('success', 'warning', 'skipped') for s in pipeline_steps)
+        return jsonify({"status": "success" if all_ok else "partial", "pipeline": pipeline_steps}), 200
 
 @app.route('/api/test', methods=['POST'])
 def api_test_connection():
