@@ -890,41 +890,7 @@ def admin_dashboard():
 
             window.onload = () => {
                 fetchConfig();
-                setInterval(fetchLogs, 2000);
-            };
-        </script>
-    </body>
-    </html>
-    """
-
-                }
-            }
-
-            // Pull live logs
-            async function fetchLogs() {
-                try {
-                    const res = await fetch('/api/logs');
-                    const data = await res.json();
-                    const logArea = document.getElementById('terminal-logs');
-                    
-                    // Keep scroll at bottom if already near bottom
-                    const isScrolledToBottom = logArea.scrollHeight - logArea.clientHeight <= logArea.scrollTop + 50;
-                    
-                    logArea.innerText = data.logs || 'No logs generated yet.';
-                    
-                    if (isScrolledToBottom) {
-                        logArea.scrollTop = logArea.scrollHeight;
-                    }
-                } catch(e) {
-                    // Fail silently for background polls
-                }
-            }
-
-            // Initial loads & setup intervals
-            window.onload = () => {
-                fetchConfig();
                 fetchLogs();
-                // Refresh logs every 2 seconds
                 setInterval(fetchLogs, 2000);
             };
         </script>
