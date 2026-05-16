@@ -365,11 +365,11 @@ def admin_dashboard():
                 to { opacity: 1; transform: translateY(0); }
             }
 
-            .brand-wrapper {
+            .logo-container {
                 display: flex;
                 align-items: baseline;
                 justify-content: center;
-                gap: 1.5rem;
+                gap: 1.2rem;
                 flex-wrap: wrap;
             }
 
@@ -390,10 +390,10 @@ def admin_dashboard():
                 color: var(--text-dim);
                 font-size: 1rem;
                 font-weight: 400;
-                letter-spacing: 0.15em;
+                letter-spacing: 0.2em;
                 text-transform: uppercase;
-                opacity: 0.7;
-                white-space: nowrap;
+                opacity: 0.8;
+                margin-bottom: 0.6rem;
             }
 
             .status-container {
@@ -784,7 +784,7 @@ def admin_dashboard():
     </head>
     <body>
         <header>
-            <div class="brand-wrapper">
+            <div class="logo-container">
                 <h1>REGAL ALGO</h1>
                 <p>powered by Duocore Softwares</p>
             </div>
