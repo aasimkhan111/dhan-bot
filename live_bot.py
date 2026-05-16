@@ -301,171 +301,210 @@ def admin_dashboard():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Regal Bot | Admin Panel</title>
-        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+        <title>Regal Algo | Duocore Softwares</title>
+        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Fira+Code:wght@400;500&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
         <style>
             :root {
-                --bg-color: #080a10;
-                --card-bg: rgba(17, 22, 37, 0.6);
-                --card-border: rgba(255, 255, 255, 0.08);
+                --bg-deep: #03050a;
+                --card-glass: rgba(13, 17, 28, 0.7);
+                --border-glow: rgba(121, 40, 202, 0.3);
                 --primary: #7928CA;
                 --secondary: #00DFD8;
                 --accent: #FF007A;
-                --text-color: #f1f5f9;
-                --text-muted: #94a3b8;
+                --text-main: #f8fafc;
+                --text-dim: #94a3b8;
                 --success: #10b981;
                 --error: #ef4444;
+                --panel-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
             }
 
             * {
                 box-sizing: border-box;
                 margin: 0;
                 padding: 0;
+                cursor: default;
             }
 
             body {
-                background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, var(--bg-color) 70%);
-                font-family: 'Outfit', sans-serif;
-                color: var(--text-color);
+                background-color: var(--bg-deep);
+                background-image: 
+                    radial-gradient(circle at 20% 30%, rgba(121, 40, 202, 0.15) 0%, transparent 40%),
+                    radial-gradient(circle at 80% 70%, rgba(0, 223, 216, 0.1) 0%, transparent 40%),
+                    linear-gradient(to bottom, transparent, rgba(0,0,0,0.5));
+                font-family: 'Inter', sans-serif;
+                color: var(--text-main);
                 min-height: 100vh;
                 display: flex;
                 flex-direction: column;
-                justify-content: flex-start;
                 align-items: center;
-                padding: 2rem 1rem;
+                padding: 3rem 1.5rem;
                 overflow-x: hidden;
+                position: relative;
             }
 
-            /* Decorative Background Glows */
-            .glow-bg {
-                position: absolute;
-                width: 400px;
-                height: 400px;
-                background: radial-gradient(circle, rgba(121, 40, 202, 0.15) 0%, transparent 70%);
-                top: 10%;
-                left: 10%;
-                z-index: -1;
-                pointer-events: none;
-            }
-            .glow-bg-2 {
-                position: absolute;
-                width: 450px;
-                height: 450px;
-                background: radial-gradient(circle, rgba(0, 223, 216, 0.12) 0%, transparent 70%);
-                bottom: 10%;
-                right: 5%;
-                z-index: -1;
+            /* Animated Background Particles */
+            body::before {
+                content: '';
+                position: fixed;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: url('https://www.transparenttextures.com/patterns/stardust.png');
+                opacity: 0.2;
+                z-index: -2;
                 pointer-events: none;
             }
 
             header {
                 text-align: center;
-                margin-bottom: 2.5rem;
+                margin-bottom: 4rem;
                 z-index: 10;
+                animation: fadeInDown 1s ease-out;
+            }
+
+            @keyframes fadeInDown {
+                from { opacity: 0; transform: translateY(-20px); }
+                to { opacity: 1; transform: translateY(0); }
             }
 
             header h1 {
-                font-size: 2.5rem;
+                font-family: 'Outfit', sans-serif;
+                font-size: 3.5rem;
                 font-weight: 800;
-                letter-spacing: -0.05em;
-                background: linear-gradient(135deg, #fff 30%, var(--secondary) 100%);
+                letter-spacing: -0.06em;
+                background: linear-gradient(135deg, #fff 20%, var(--secondary) 50%, var(--primary) 100%);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
-                margin-bottom: 0.5rem;
+                margin-bottom: 0.2rem;
+                filter: drop-shadow(0 0 20px rgba(121, 40, 202, 0.3));
             }
 
             header p {
-                color: var(--text-muted);
-                font-size: 1rem;
-                font-weight: 300;
+                font-family: 'Outfit', sans-serif;
+                color: var(--text-dim);
+                font-size: 1.1rem;
+                font-weight: 400;
+                letter-spacing: 0.2em;
+                text-transform: uppercase;
+                opacity: 0.8;
             }
 
-            header .status-badge {
+            .status-container {
+                margin-top: 1.5rem;
+            }
+
+            .status-badge {
                 display: inline-flex;
                 align-items: center;
-                gap: 0.5rem;
-                background: rgba(16, 185, 129, 0.1);
+                gap: 0.6rem;
+                background: rgba(16, 185, 129, 0.05);
                 border: 1px solid rgba(16, 185, 129, 0.2);
-                padding: 0.35rem 0.85rem;
-                border-radius: 50px;
-                font-size: 0.8rem;
+                padding: 0.5rem 1.2rem;
+                border-radius: 100px;
+                font-size: 0.85rem;
                 color: var(--success);
                 font-weight: 600;
-                margin-top: 1rem;
+                letter-spacing: 0.05em;
+                box-shadow: 0 0 20px rgba(16, 185, 129, 0.1);
             }
 
-            header .status-badge::before {
+            .status-badge::before {
                 content: '';
-                width: 8px;
-                height: 8px;
+                width: 10px;
+                height: 10px;
                 background: var(--success);
                 border-radius: 50%;
-                box-shadow: 0 0 10px var(--success);
-                animation: pulse 1.5s infinite;
+                box-shadow: 0 0 12px var(--success);
+                animation: pulseGlow 2s infinite;
             }
 
-            @keyframes pulse {
-                0% { opacity: 0.4; }
-                50% { opacity: 1; }
-                100% { opacity: 0.4; }
+            @keyframes pulseGlow {
+                0% { transform: scale(0.9); opacity: 0.5; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+                70% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+                100% { transform: scale(0.9); opacity: 0.5; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
             }
 
             .main-container {
                 display: grid;
                 grid-template-columns: 1fr;
-                gap: 2rem;
+                gap: 2.5rem;
                 width: 100%;
-                max-width: 1100px;
+                max-width: 1200px;
                 z-index: 10;
+                animation: fadeInUp 1s ease-out 0.2s both;
             }
 
-            @media(min-width: 850px) {
+            @keyframes fadeInUp {
+                from { opacity: 0; transform: translateY(30px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+
+            @media(min-width: 900px) {
                 .main-container {
-                    grid-template-columns: 5.5fr 4.5fr;
+                    grid-template-columns: 1fr 1.2fr;
                 }
             }
 
-            /* Glassmorphic Cards */
+            /* Futuristic Glass Card */
             .card {
-                background: var(--card-bg);
+                background: var(--card-glass);
                 border: 1px solid var(--card-border);
-                border-radius: 20px;
-                padding: 2rem;
-                backdrop-filter: blur(15px);
-                -webkit-backdrop-filter: blur(15px);
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-                transition: transform 0.3s ease, border-color 0.3s ease;
+                border-radius: 24px;
+                padding: 2.5rem;
+                backdrop-filter: blur(20px);
+                -webkit-backdrop-filter: blur(20px);
+                box-shadow: var(--panel-shadow);
+                position: relative;
+                overflow: hidden;
+                transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            }
+
+            .card::after {
+                content: '';
+                position: absolute;
+                top: 0; left: 0; width: 100%; height: 2px;
+                background: linear-gradient(90deg, transparent, var(--secondary), transparent);
+                opacity: 0;
+                transition: opacity 0.4s;
             }
 
             .card:hover {
-                border-color: rgba(0, 223, 216, 0.2);
+                border-color: rgba(0, 223, 216, 0.3);
+                transform: translateY(-5px);
+                box-shadow: 0 30px 60px rgba(0, 0, 0, 0.7);
+            }
+
+            .card:hover::after {
+                opacity: 1;
             }
 
             .card-title {
-                font-size: 1.3rem;
-                font-weight: 600;
-                margin-bottom: 1.5rem;
+                font-family: 'Outfit', sans-serif;
+                font-size: 1.5rem;
+                font-weight: 700;
+                margin-bottom: 2rem;
                 display: flex;
                 align-items: center;
-                gap: 0.75rem;
-                background: linear-gradient(135deg, #fff 50%, var(--text-muted) 100%);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
+                gap: 1rem;
+                color: #fff;
+            }
+
+            .card-title svg {
+                color: var(--secondary);
+                filter: drop-shadow(0 0 8px var(--secondary));
             }
 
             /* Form Elements */
             .form-group {
-                margin-bottom: 1.5rem;
+                margin-bottom: 1.8rem;
             }
 
             .form-group label {
                 display: block;
-                font-size: 0.85rem;
-                font-weight: 600;
-                color: var(--text-muted);
-                margin-bottom: 0.5rem;
+                font-size: 0.75rem;
+                font-weight: 700;
+                color: var(--text-dim);
+                margin-bottom: 0.7rem;
                 text-transform: uppercase;
-                letter-spacing: 0.05em;
+                letter-spacing: 0.15em;
             }
 
             .input-wrapper {
@@ -474,217 +513,236 @@ def admin_dashboard():
 
             .form-group input {
                 width: 100%;
-                background: rgba(10, 14, 25, 0.8);
+                background: rgba(0, 0, 0, 0.4);
                 border: 1px solid var(--card-border);
-                border-radius: 10px;
-                padding: 0.85rem 1rem;
-                font-family: inherit;
-                font-size: 0.95rem;
+                border-radius: 14px;
+                padding: 1.1rem 1.2rem;
+                font-family: 'Inter', sans-serif;
+                font-size: 1rem;
                 color: #fff;
-                transition: border-color 0.25s, box-shadow 0.25s;
+                transition: all 0.3s ease;
+                outline: none;
+                cursor: text;
             }
 
             .form-group input:focus {
-                outline: none;
                 border-color: var(--secondary);
-                box-shadow: 0 0 15px rgba(0, 223, 216, 0.15);
+                background: rgba(0, 223, 216, 0.03);
+                box-shadow: 0 0 20px rgba(0, 223, 216, 0.1);
+            }
+
+            .form-group input::placeholder {
+                color: #475569;
             }
 
             .btn-container {
                 display: flex;
-                gap: 1rem;
-                margin-top: 2rem;
+                gap: 1.2rem;
+                margin-top: 2.5rem;
             }
 
             button {
                 flex: 1;
-                font-family: inherit;
-                font-weight: 600;
-                font-size: 0.95rem;
-                padding: 0.9rem 1.5rem;
+                font-family: 'Outfit', sans-serif;
+                font-weight: 700;
+                font-size: 1rem;
+                padding: 1.1rem 1.5rem;
                 border: none;
-                border-radius: 10px;
+                border-radius: 14px;
                 cursor: pointer;
-                transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                gap: 0.5rem;
+                gap: 0.7rem;
+                position: relative;
+                overflow: hidden;
+                z-index: 1;
+            }
+
+            button::before {
+                content: '';
+                position: absolute;
+                top: 0; left: -100%; width: 100%; height: 100%;
+                background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+                transition: left 0.5s;
+                z-index: -1;
+            }
+
+            button:hover::before {
+                left: 100%;
             }
 
             button:active {
-                transform: scale(0.98);
+                transform: scale(0.96);
             }
 
             .btn-primary {
                 background: linear-gradient(135deg, var(--primary) 0%, #4c1d95 100%);
                 color: #fff;
-                box-shadow: 0 5px 15px rgba(121, 40, 202, 0.3);
+                box-shadow: 0 10px 25px rgba(121, 40, 202, 0.3);
             }
 
             .btn-primary:hover {
-                background: linear-gradient(135deg, #8b5cf6 0%, #5b21b6 100%);
-                box-shadow: 0 8px 20px rgba(121, 40, 202, 0.4);
+                box-shadow: 0 15px 35px rgba(121, 40, 202, 0.5);
+                filter: brightness(1.1);
             }
 
             .btn-secondary {
-                background: rgba(255, 255, 255, 0.05);
-                color: var(--text-color);
+                background: rgba(255, 255, 255, 0.03);
+                color: var(--text-main);
                 border: 1px solid var(--card-border);
+                backdrop-filter: blur(10px);
             }
 
             .btn-secondary:hover {
-                background: rgba(255, 255, 255, 0.1);
-                border-color: var(--text-muted);
+                background: rgba(255, 255, 255, 0.08);
+                border-color: var(--text-dim);
             }
 
-            /* Logging Console */
+            /* Terminal Aesthetic */
             .console-card {
                 display: flex;
                 flex-direction: column;
                 height: 100%;
-                min-height: 450px;
+                border: 1px solid rgba(0, 223, 216, 0.15);
             }
 
             .console-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                margin-bottom: 1rem;
+                margin-bottom: 1.5rem;
+                padding-bottom: 1rem;
+                border-bottom: 1px solid rgba(255,255,255,0.05);
             }
-
-            .console-header .controls {
-                display: flex;
-                gap: 0.5rem;
-            }
-
-            .dot {
-                width: 10px;
-                height: 10px;
-                border-radius: 50%;
-                background: var(--text-muted);
-            }
-
-            .dot-red { background: var(--error); }
-            .dot-yellow { background: #f59e0b; }
-            .dot-green { background: var(--success); }
 
             .console-area {
                 flex-grow: 1;
-                background: #04060a;
-                border: 1px solid rgba(255, 255, 255, 0.05);
-                border-radius: 12px;
-                padding: 1.2rem;
+                background: #020408;
+                border-radius: 16px;
+                padding: 1.5rem;
                 font-family: 'Fira Code', monospace;
-                font-size: 0.8rem;
-                line-height: 1.5;
-                color: #8af7b7;
+                font-size: 0.85rem;
+                line-height: 1.6;
+                color: #a5f3fc;
                 overflow-y: auto;
-                max-height: 400px;
+                max-height: 480px;
                 white-space: pre-wrap;
-                box-shadow: inset 0 2px 8px rgba(0,0,0,0.8);
+                box-shadow: inset 0 4px 20px rgba(0,0,0,0.8);
+                border: 1px solid rgba(255,255,255,0.03);
             }
 
-            /* Custom scrollbar */
-            ::-webkit-scrollbar {
-                width: 6px;
-                height: 6px;
+            .console-area::-webkit-scrollbar {
+                width: 5px;
             }
-            ::-webkit-scrollbar-track {
-                background: transparent;
-            }
-            ::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.1);
+            .console-area::-webkit-scrollbar-thumb {
+                background: rgba(0, 223, 216, 0.2);
                 border-radius: 10px;
             }
-            ::-webkit-scrollbar-thumb:hover {
-                background: rgba(255, 255, 255, 0.2);
-            }
 
-            /* Alerts/Notifications */
+            /* Custom Toasts */
             .toast {
                 position: fixed;
-                bottom: 2rem;
-                right: 2rem;
-                background: #111827;
-                border-left: 4px solid var(--secondary);
-                padding: 1rem 1.5rem;
-                border-radius: 8px;
-                box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+                bottom: 2.5rem;
+                right: 2.5rem;
+                background: rgba(13, 17, 28, 0.95);
+                backdrop-filter: blur(20px);
+                border: 1px solid var(--card-border);
+                padding: 1.2rem 2rem;
+                border-radius: 16px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.4);
                 display: flex;
                 align-items: center;
-                gap: 0.75rem;
-                transform: translateY(150%);
-                transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-                z-index: 100;
+                gap: 1rem;
+                transform: translateX(200%);
+                transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+                z-index: 1000;
             }
 
-            .toast.show {
-                transform: translateY(0);
+            .toast.show { transform: translateX(0); }
+            .toast-success { border-left: 4px solid var(--success); }
+            .toast-error { border-left: 4px solid var(--error); }
+
+            .loader-dots {
+                display: inline-flex;
+                gap: 4px;
             }
-
-            .toast-success { border-left-color: var(--success); }
-            .toast-error { border-left-color: var(--error); }
-
-            /* Grid loader */
-            .spinner {
-                border: 3px solid rgba(255,255,255,0.1);
-                width: 20px;
-                height: 20px;
+            .loader-dots span {
+                width: 4px; height: 4px;
+                background: currentColor;
                 border-radius: 50%;
-                border-left-color: var(--secondary);
+                animation: dotBlink 1.4s infinite;
+            }
+            .loader-dots span:nth-child(2) { animation-delay: 0.2s; }
+            .loader-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+            @keyframes dotBlink {
+                0%, 80%, 100% { opacity: 0; }
+                40% { opacity: 1; }
+            }
+
+            .spinner {
+                width: 20px; height: 20px;
+                border: 2px solid rgba(255,255,255,0.2);
+                border-top-color: #fff;
+                border-radius: 50%;
                 animation: spin 0.8s linear infinite;
                 display: none;
             }
 
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
+            @keyframes spin { to { transform: rotate(360deg); } }
+
+            footer {
+                margin-top: 5rem;
+                color: var(--text-dim);
+                font-size: 0.85rem;
+                text-align: center;
+                letter-spacing: 0.05em;
             }
         </style>
     </head>
     <body>
-        <div class="glow-bg"></div>
-        <div class="glow-bg-2"></div>
-
         <header>
-            <h1>REGAL BOT ENGINE</h1>
-            <p>DhanHQ Live Order Execution Portal & Configurator</p>
-            <div class="status-badge" id="bot-status">Active & Listening</div>
+            <h1>REGAL ALGO</h1>
+            <p>powered by Duocore Softwares</p>
+            <div class="status-container">
+                <div class="status-badge" id="bot-status">CORE SYSTEM ACTIVE</div>
+            </div>
         </header>
 
         <div class="main-container">
-            <!-- Configuration Settings Card -->
+            <!-- Configuration Settings -->
             <div class="card">
                 <div class="card-title">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-                    API Credentials Configurator
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                    Command Center
                 </div>
                 
                 <form id="config-form" onsubmit="saveConfig(event)">
                     <div class="form-group">
-                        <label for="client-id">Dhan Client ID</label>
-                        <input type="text" id="client-id" required placeholder="e.g. 1100819221">
+                        <label for="client-id">Dhan Client Identity</label>
+                        <input type="text" id="client-id" required placeholder="Enter Client ID">
                     </div>
                     
                     <div class="form-group">
-                        <label for="access-token">Dhan Access Token</label>
-                        <input type="password" id="access-token" required placeholder="Paste your full access token here">
+                        <label for="access-token">Dhan API Vault Key</label>
+                        <input type="password" id="access-token" required placeholder="Enter Access Token">
                     </div>
 
                     <div class="form-group">
-                        <label for="secret-token">TradingView Secret Token</label>
-                        <input type="text" id="secret-token" required placeholder="JunnarTrader2026">
+                        <label for="secret-token">Signal Secret Token</label>
+                        <input type="text" id="secret-token" required placeholder="Enter Secret Token">
                     </div>
 
                     <div class="btn-container">
                         <button type="button" class="btn-secondary" onclick="testConnection()">
                             <div class="spinner" id="test-spinner"></div>
-                            <span id="test-btn-text">Test Conn</span>
+                            <span id="test-btn-text">Check Connection</span>
                         </button>
                         <button type="submit" class="btn-primary">
                             <div class="spinner" id="save-spinner"></div>
-                            <span id="save-btn-text">Push & Sync</span>
+                            <span id="save-btn-text">Initialize Sync</span>
                         </button>
                     </div>
                 </form>
@@ -694,55 +752,49 @@ def admin_dashboard():
             <div class="card console-card">
                 <div class="console-header">
                     <div class="card-title" style="margin-bottom: 0;">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                        Live Log Monitor
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                        Neural Log Stream
                     </div>
-                    <div class="controls">
-                        <span class="dot dot-red"></span>
-                        <span class="dot dot-yellow"></span>
-                        <span class="dot dot-green"></span>
+                    <div style="display: flex; gap: 6px;">
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: #ef4444; opacity: 0.6;"></span>
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; opacity: 0.6;"></span>
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: #10b981; opacity: 0.6;"></span>
                     </div>
                 </div>
-                <div class="console-area" id="terminal-logs">Connecting to live console stream...</div>
+                <div class="console-area" id="terminal-logs">Establishing link to neural stream...</div>
             </div>
         </div>
 
+        <footer>
+            &copy; 2026 Duocore Softwares | Regal Algo Engine v4.6
+        </footer>
+
         <div class="toast" id="toast-notif">
-            <span id="toast-text">Message goes here</span>
+            <span id="toast-text"></span>
         </div>
 
         <script>
-            // Show custom stylish toast
             function showToast(text, type = 'success') {
                 const toast = document.getElementById('toast-notif');
                 const toastText = document.getElementById('toast-text');
-                
-                toast.className = 'toast';
-                if(type === 'success') toast.classList.add('toast-success');
-                if(type === 'error') toast.classList.add('toast-error');
-                
+                toast.className = 'toast ' + (type === 'success' ? 'toast-success' : 'toast-error');
                 toastText.innerText = text;
                 toast.classList.add('show');
-                
-                setTimeout(() => {
-                    toast.classList.remove('show');
-                }, 4000);
+                setTimeout(() => toast.classList.remove('show'), 4000);
             }
 
-            // Fetch current config on load
             async function fetchConfig() {
                 try {
                     const res = await fetch('/api/config');
                     const data = await res.json();
                     document.getElementById('client-id').value = data.CLIENT_ID || '';
                     document.getElementById('access-token').value = data.ACCESS_TOKEN || '';
-                    document.getElementById('secret-token').value = data.SECRET_TOKEN || 'JunnarTrader2026';
+                    document.getElementById('secret-token').value = data.SECRET_TOKEN || '';
                 } catch (e) {
-                    showToast('Failed to load credentials from server.', 'error');
+                    showToast('Failed to sync vault.', 'error');
                 }
             }
 
-            // Save & Sync Configuration with Live Pipeline
             async function saveConfig(e) {
                 e.preventDefault();
                 const saveSpinner = document.getElementById('save-spinner');
@@ -750,14 +802,11 @@ def admin_dashboard():
                 const logArea = document.getElementById('terminal-logs');
                 
                 saveSpinner.style.display = 'block';
-                saveBtnText.innerText = 'Deploying...';
+                saveBtnText.innerText = 'Syncing...';
 
-                // Show live pipeline in console
                 const now = new Date().toLocaleTimeString();
-                logArea.innerText = `[${now}] ═══════════════════════════════════════\n`;
-                logArea.innerText += `[${now}] 🚀 DEPLOYMENT PIPELINE STARTED\n`;
-                logArea.innerText += `[${now}] ═══════════════════════════════════════\n\n`;
-                logArea.innerText += `⏳ Step 1/4: Saving config.json...\n`;
+                logArea.innerHTML = `<span style="color:var(--secondary)">[${now}]</span> 🚀 <span style="color:#fff; font-weight:bold;">INITIALIZING QUANT DEPLOYMENT...</span>\\n`;
+                logArea.innerHTML += `<span style="color:#64748b">---------------------------------------------------</span>\\n`;
                 logArea.scrollTop = logArea.scrollHeight;
 
                 const payload = {
@@ -774,80 +823,80 @@ def admin_dashboard():
                     });
                     const result = await res.json();
                     
-                    // Render step-by-step pipeline results
-                    if(result.pipeline && result.pipeline.length > 0) {
-                        let pipelineText = '';
-                        let allSuccess = true;
-                        
+                    if(result.pipeline) {
+                        let text = logArea.innerHTML;
                         result.pipeline.forEach((step, i) => {
-                            const icon = step.status === 'success' ? '✅' : 
-                                         step.status === 'warning' ? '⚠️' : 
-                                         step.status === 'skipped' ? '⏭️' : '❌';
-                            pipelineText += `${icon} Step ${i+1}/4: ${step.step}\n`;
-                            pipelineText += `   ↳ ${step.detail}\n\n`;
-                            if(step.status === 'failed') allSuccess = false;
+                            const icon = step.status === 'success' ? '✅' : '❌';
+                            const color = step.status === 'success' ? 'var(--success)' : 'var(--error)';
+                            text += `<span style="color:${color}">${icon} Step ${i+1}: ${step.step}</span>\\n`;
+                            text += `   <span style="color:#64748b">↳ ${step.detail}</span>\\n\\n`;
                         });
-                        
                         const endTime = new Date().toLocaleTimeString();
-                        pipelineText += `[${endTime}] ═══════════════════════════════════════\n`;
-                        pipelineText += allSuccess 
-                            ? `[${endTime}] 🎉 DEPLOYMENT COMPLETE — ALL SYSTEMS SYNCED\n`
-                            : `[${endTime}] ⚠️  DEPLOYMENT PARTIAL — CHECK STEPS ABOVE\n`;
-                        pipelineText += `[${endTime}] ═══════════════════════════════════════`;
-                        
-                        logArea.innerText = pipelineText;
+                        text += `<span style="color:#64748b">---------------------------------------------------</span>\\n`;
+                        text += `<span style="color:var(--secondary)">[${endTime}]</span> 🎉 <span style="color:#fff;">QUANT SYSTEMS SECURED & DEPLOYED.</span>`;
+                        logArea.innerHTML = text;
                         logArea.scrollTop = logArea.scrollHeight;
-                        
-                        if(allSuccess) {
-                            showToast('🎉 Full pipeline success! Config live on EC2.', 'success');
-                        } else {
-                            showToast('Partial deployment. Check console for details.', 'error');
-                        }
-                    } else if(result.status === 'success') {
-                        showToast('Credentials updated successfully!', 'success');
-                    } else {
-                        showToast('Failed: ' + (result.remarks || 'Unknown error'), 'error');
+                        showToast('Deployment Successful', 'success');
                     }
                 } catch(err) {
-                    logArea.innerText += `\n❌ Network error: ${err.message}`;
-                    showToast('Network error while deploying.', 'error');
+                    showToast('Deployment Failed', 'error');
                 } finally {
                     saveSpinner.style.display = 'none';
-                    saveBtnText.innerText = 'Push & Sync';
+                    saveBtnText.innerText = 'Initialize Sync';
                 }
             }
 
-            // Test connection using API
             async function testConnection() {
                 const testSpinner = document.getElementById('test-spinner');
                 const testBtnText = document.getElementById('test-btn-text');
-                
                 testSpinner.style.display = 'block';
-                testBtnText.innerText = 'Testing...';
-
-                const payload = {
-                    CLIENT_ID: document.getElementById('client-id').value.trim(),
-                    ACCESS_TOKEN: document.getElementById('access-token').value.trim()
-                };
-
+                testBtnText.innerText = 'Checking...';
                 try {
                     const res = await fetch('/api/test', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
+                        body: JSON.stringify({
+                            CLIENT_ID: document.getElementById('client-id').value.trim(),
+                            ACCESS_TOKEN: document.getElementById('access-token').value.trim()
+                        })
                     });
                     const result = await res.json();
-                    
                     if(result.status === 'success') {
-                        showToast('Connection Successful! Available Balance: ₹' + result.balance, 'success');
+                        showToast('Auth verified. Balance: ₹' + result.balance, 'success');
                     } else {
-                        showToast('Dhan Auth Failed: ' + result.error, 'error');
+                        showToast('Auth denied: ' + result.error, 'error');
                     }
                 } catch(err) {
-                    showToast('Error sending connection request.', 'error');
+                    showToast('Link error.', 'error');
                 } finally {
                     testSpinner.style.display = 'none';
-                    testBtnText.innerText = 'Test Conn';
+                    testBtnText.innerText = 'Check Connection';
+                }
+            }
+
+            async function fetchLogs() {
+                try {
+                    const res = await fetch('/api/logs');
+                    const data = await res.json();
+                    const logArea = document.getElementById('terminal-logs');
+                    const isScrolledToBottom = logArea.scrollHeight - logArea.clientHeight <= logArea.scrollTop + 50;
+                    if(data.logs) {
+                        // Minimal formatting for logs
+                        logArea.innerText = data.logs;
+                    }
+                    if (isScrolledToBottom) logArea.scrollTop = logArea.scrollHeight;
+                } catch(e) {}
+            }
+
+            window.onload = () => {
+                fetchConfig();
+                setInterval(fetchLogs, 2000);
+            };
+        </script>
+    </body>
+    </html>
+    """
+
                 }
             }
 
