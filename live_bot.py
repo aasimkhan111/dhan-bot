@@ -365,6 +365,14 @@ def admin_dashboard():
                 to { opacity: 1; transform: translateY(0); }
             }
 
+            .brand-wrapper {
+                display: flex;
+                align-items: baseline;
+                justify-content: center;
+                gap: 1.5rem;
+                flex-wrap: wrap;
+            }
+
             header h1 {
                 font-family: 'Outfit', sans-serif;
                 font-size: 3.5rem;
@@ -373,18 +381,19 @@ def admin_dashboard():
                 background: linear-gradient(135deg, #fff 20%, var(--secondary) 50%, var(--primary) 100%);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
-                margin-bottom: 0.2rem;
+                margin-bottom: 0;
                 filter: drop-shadow(0 0 20px rgba(121, 40, 202, 0.3));
             }
 
             header p {
                 font-family: 'Outfit', sans-serif;
                 color: var(--text-dim);
-                font-size: 1.1rem;
+                font-size: 1rem;
                 font-weight: 400;
-                letter-spacing: 0.2em;
+                letter-spacing: 0.15em;
                 text-transform: uppercase;
-                opacity: 0.8;
+                opacity: 0.7;
+                white-space: nowrap;
             }
 
             .status-container {
@@ -775,8 +784,10 @@ def admin_dashboard():
     </head>
     <body>
         <header>
-            <h1>REGAL ALGO</h1>
-            <p>powered by Duocore Softwares</p>
+            <div class="brand-wrapper">
+                <h1>REGAL ALGO</h1>
+                <p>powered by Duocore Softwares</p>
+            </div>
             <div class="status-container">
                 <div class="status-badge" id="bot-status">CORE SYSTEM ACTIVE</div>
             </div>
