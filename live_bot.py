@@ -780,20 +780,106 @@ def admin_dashboard():
                 background: rgba(255, 255, 255, 0.02) !important;
                 border-style: dashed !important;
             }
+
+            /* PIN Gate Styles */
+            #pin-gate {
+                position: fixed;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: var(--bg-deep);
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                z-index: 9999;
+                backdrop-filter: blur(40px);
+            }
+
+            .pin-card {
+                background: var(--card-glass);
+                padding: 3rem;
+                border-radius: 30px;
+                border: 1px solid var(--border-glow);
+                text-align: center;
+                max-width: 400px;
+                width: 90%;
+                box-shadow: 0 0 50px rgba(121, 40, 202, 0.2);
+            }
+
+            .pin-card h2 {
+                font-family: 'Outfit', sans-serif;
+                margin-bottom: 1rem;
+                font-size: 1.8rem;
+                background: linear-gradient(to right, #fff, var(--secondary));
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+
+            .pin-card p {
+                color: var(--text-dim);
+                font-size: 0.9rem;
+                margin-bottom: 2rem;
+            }
+
+            .pin-input-group {
+                display: flex;
+                gap: 10px;
+                justify-content: center;
+                margin-bottom: 2rem;
+            }
+
+            .pin-input {
+                width: 50px;
+                height: 60px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                font-size: 2rem;
+                text-align: center;
+                color: var(--secondary);
+                outline: none;
+                transition: all 0.3s;
+            }
+
+            .pin-input:focus {
+                border-color: var(--secondary);
+                box-shadow: 0 0 15px rgba(0, 223, 216, 0.2);
+                background: rgba(0, 223, 216, 0.05);
+            }
+
+            #main-content {
+                display: none;
+                width: 100%;
+                max-width: 1200px;
+            }
         </style>
     </head>
     <body>
-        <header>
-            <div class="logo-container">
-                <h1>REGAL ALGO</h1>
-                <p>powered by Duocore Softwares</p>
+        <div id="pin-gate">
+            <div class="pin-card">
+                <h2>SECURITY CLEARANCE</h2>
+                <p>Please enter your 4-digit Admin PIN to access the Regal Algo Command Center.</p>
+                <div class="pin-input-group">
+                    <input type="password" maxlength="1" class="pin-input" onkeyup="moveFocus(this, 1)">
+                    <input type="password" maxlength="1" class="pin-input" onkeyup="moveFocus(this, 2)">
+                    <input type="password" maxlength="1" class="pin-input" onkeyup="moveFocus(this, 3)">
+                    <input type="password" maxlength="1" class="pin-input" onkeyup="moveFocus(this, 4)">
+                </div>
+                <div id="pin-error" style="color: var(--error); font-size: 0.8rem; margin-top: -1rem; display: none;">Invalid Access Code. Access Denied.</div>
             </div>
-            <div class="status-container">
-                <div class="status-badge" id="bot-status">CORE SYSTEM ACTIVE</div>
-            </div>
-        </header>
+        </div>
 
-        <div class="main-container">
+        <div id="main-content">
+            <header>
+                <div class="logo-container">
+                    <h1>REGAL ALGO</h1>
+                    <p>powered by Duocore Softwares</p>
+                </div>
+                <div class="status-container">
+                    <div class="status-badge" id="bot-status">CORE SYSTEM ACTIVE</div>
+                </div>
+            </header>
+
+            <div class="main-container">
             <!-- Configuration Settings -->
             <div class="card">
                 <div class="card-title">
@@ -864,6 +950,38 @@ def admin_dashboard():
         </div>
 
         <script>
+            let adminPin = "";
+
+            function moveFocus(el, index) {
+                if (el.value.length === 1 && index < 4) {
+                    el.nextElementSibling.focus();
+                }
+                
+                // Collect full PIN
+                const inputs = document.querySelectorAll('.pin-input');
+                let currentPin = "";
+                inputs.forEach(input => currentPin += input.value);
+                
+                if (currentPin.length === 4) {
+                    verifyPin(currentPin);
+                }
+            }
+
+            function verifyPin(pin) {
+                if (pin === "1502") {
+                    adminPin = pin;
+                    document.getElementById('pin-gate').style.display = 'none';
+                    document.getElementById('main-content').style.display = 'block';
+                    fetchConfig();
+                    setInterval(fetchLogs, 2000);
+                } else {
+                    document.getElementById('pin-error').style.display = 'block';
+                    // Clear inputs
+                    document.querySelectorAll('.pin-input').forEach(input => input.value = "");
+                    document.querySelectorAll('.pin-input')[0].focus();
+                }
+            }
+
             function showToast(text, type = 'success') {
                 const toast = document.getElementById('toast-notif');
                 const toastText = document.getElementById('toast-text');
@@ -920,7 +1038,8 @@ def admin_dashboard():
                 const payload = {
                     CLIENT_ID: document.getElementById('client-id').value.trim(),
                     ACCESS_TOKEN: document.getElementById('access-token').value.trim(),
-                    SECRET_TOKEN: document.getElementById('secret-token').value.trim()
+                    SECRET_TOKEN: document.getElementById('secret-token').value.trim(),
+                    pin: adminPin
                 };
 
                 try {
@@ -997,9 +1116,8 @@ def admin_dashboard():
             }
 
             window.onload = () => {
-                fetchConfig();
-                fetchLogs();
-                setInterval(fetchLogs, 2000);
+                const firstInput = document.querySelectorAll('.pin-input')[0];
+                if (firstInput) firstInput.focus();
             };
         </script>
     </body>
@@ -1022,6 +1140,10 @@ def api_config():
         data = request.get_json(force=True, silent=True)
         if not data:
             return jsonify({"status": "failed", "remarks": "Invalid body"}), 400
+        
+        # PIN VERIFICATION
+        if data.get('pin') != "1502":
+            return jsonify({"status": "failed", "remarks": "Security Breach: Invalid Admin PIN"}), 403
         
         pipeline_steps = save_and_deploy(data)
         all_ok = all(s['status'] in ('success', 'warning', 'skipped') for s in pipeline_steps)
