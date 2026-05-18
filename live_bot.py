@@ -27,7 +27,7 @@ def load_config():
         "SECRET_TOKEN": "JunnarTrader2026"
     }
 
-EC2_IP = "65.0.80.107"
+EC2_IP = "43.205.136.79"
 
 def run_and_log_command(cmd_args, cwd=None):
     """Execute a shell command, log its output, and return (success, output_text)."""
