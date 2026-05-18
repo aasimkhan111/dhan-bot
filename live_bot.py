@@ -72,7 +72,13 @@ def save_and_deploy(config_data):
         steps.append({"step": "Save config.json", "status": "failed", "detail": str(e)})
         return steps  # Cannot continue without saving
     
-    # ── STEP 2: Git Add + Commit ──
+    # ── On EC2 (Linux): Skip git ops, config is already live ──
+    if os.name != 'nt':
+        print("✅ [Step 2/2] Running on EC2 — config saved and applied instantly!")
+        steps.append({"step": "EC2 Live Reload", "status": "success", "detail": "Config applied instantly on server (no git needed)"})
+        return steps
+    
+    # ── STEP 2: Git Add + Commit (LOCAL Windows only) ──
     if os.path.exists(".git"):
         print("📦 [Step 2/4] Staging and committing changes...")
         ok_add, _ = run_and_log_command(["git", "add", "config.json"])
@@ -94,28 +100,22 @@ def save_and_deploy(config_data):
         steps.append({"step": "Git Push", "status": "failed", "detail": push_out or "Push failed"})
         return steps
     
-    # ── STEP 4: EC2 Sync ──
-    if os.name == 'nt':
-        # Running on LOCAL Windows → trigger remote EC2 pull
-        print(f"🌐 [Step 4/4] Triggering Git Pull on EC2 ({EC2_IP})...")
-        try:
-            import requests as req_lib
-            url = f"http://{EC2_IP}/api/git-pull-and-reload"
-            payload = {"secret": config_data.get('SECRET_TOKEN', 'JunnarTrader2026')}
-            resp = req_lib.post(url, json=payload, timeout=20)
-            if resp.status_code == 200:
-                print("🎉 [Step 4/4] EC2 Server pulled latest changes and reloaded!")
-                steps.append({"step": "EC2 Auto-Pull", "status": "success", "detail": "Server reloaded with new credentials"})
-            else:
-                print(f"⚠️ [Step 4/4] EC2 sync returned: {resp.text}")
-                steps.append({"step": "EC2 Auto-Pull", "status": "failed", "detail": resp.text})
-        except Exception as e:
-            print(f"⚠️ [Step 4/4] Could not contact EC2: {e}")
-            steps.append({"step": "EC2 Auto-Pull", "status": "failed", "detail": str(e)})
-    else:
-        # Running ON EC2 itself → config is already saved locally, no pull needed
-        print("✅ [Step 4/4] Running on EC2 — config already live on this server!")
-        steps.append({"step": "EC2 Live Reload", "status": "success", "detail": "Config applied instantly (running on EC2)"})
+    # ── STEP 4: Trigger EC2 to pull latest ──
+    print(f"🌐 [Step 4/4] Triggering Git Pull on EC2 ({EC2_IP})...")
+    try:
+        import requests as req_lib
+        url = f"http://{EC2_IP}/api/git-pull-and-reload"
+        payload = {"secret": config_data.get('SECRET_TOKEN', 'JunnarTrader2026')}
+        resp = req_lib.post(url, json=payload, timeout=20)
+        if resp.status_code == 200:
+            print("🎉 [Step 4/4] EC2 Server pulled latest changes and reloaded!")
+            steps.append({"step": "EC2 Auto-Pull", "status": "success", "detail": "Server reloaded with new credentials"})
+        else:
+            print(f"⚠️ [Step 4/4] EC2 sync returned: {resp.text}")
+            steps.append({"step": "EC2 Auto-Pull", "status": "failed", "detail": resp.text})
+    except Exception as e:
+        print(f"⚠️ [Step 4/4] Could not contact EC2: {e}")
+        steps.append({"step": "EC2 Auto-Pull", "status": "failed", "detail": str(e)})
     
     return steps
 
