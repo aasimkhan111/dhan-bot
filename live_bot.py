@@ -184,8 +184,15 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
             match = match.copy()
             if 'SEM_EXPIRY_DATE' in match.columns:
                 match['expiry_dt'] = pd.to_datetime(match['SEM_EXPIRY_DATE'], errors='coerce')
+                # Filter out expired contracts (expiry date before today)
+                today = pd.Timestamp.now().normalize()
+                match = match[match['expiry_dt'] >= today]
                 match = match.dropna(subset=['expiry_dt']).sort_values('expiry_dt')
             
+            if match.empty:
+                print(f"⚠️ No ACTIVE (unexpired) strike {symbol} found.")
+                return None, None
+
             # Use the first active match
             row = match.iloc[0]
             sec_id = int(row['SEM_SMST_SECURITY_ID'])
