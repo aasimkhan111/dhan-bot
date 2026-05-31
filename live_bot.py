@@ -254,7 +254,7 @@ def webhook():
             dhan_order_type = dhan_live.MARKET
             final_price = 0.0
         else:
-            # === BUY ORDERS: Fetch LTP + add 1% buffer for safe entry ===
+            # === BUY ORDERS: Fetch exact LTP for precise entry ===
             print(f"🔍 Fetching Precise LTP for {sec_id} via Data API...")
             try:
                 seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
@@ -271,11 +271,9 @@ def webhook():
                     
                     ltp = float(id_data.get('last_price', 0))
                     if ltp > 0:
-                        # Add 1% buffer above LTP so order doesn't fail due to stale price
-                        buffered_price = round(ltp * 1.01, 2)
-                        final_price = buffered_price
+                        final_price = ltp
                         dhan_order_type = dhan_live.LIMIT
-                        print(f"🎯 LTP: {ltp} → Buffered Buy Price: {final_price} (+1%). Using LIMIT order.")
+                        print(f"🎯 Exact LTP: {final_price}. Using LIMIT order.")
                     else:
                         print("⚠️ LTP was 0. Falling back to Market (Protection).")
                 else:
