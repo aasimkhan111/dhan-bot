@@ -248,34 +248,42 @@ def webhook():
         dhan_order_type = dhan_live.MARKET
         final_price = 0.0
         
-        # Fetch exact LTP from Dhan Data API to satisfy strict Limit requirements
-        print(f"🔍 Fetching Precise LTP for {sec_id} via Data API...")
-        try:
-            seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
-            securities = {seg_key: [int(sec_id)]}
-            
-            quote = dhan_live.ticker_data(securities)
-            print(f"📊 Raw Ticker Response: {quote}")
-            
-            if isinstance(quote, dict) and quote.get('status') == 'success':
-                outer_data = quote.get('data', {})
-                inner_data = outer_data.get('data', {})
-                seg_data = inner_data.get(seg_key, {})
-                id_data = seg_data.get(str(sec_id), {})
+        # === SELL ORDERS: Always use MARKET for guaranteed exit ===
+        if side_str == 'SELL':
+            print(f"📤 SELL detected — Using MARKET order for guaranteed exit.")
+            dhan_order_type = dhan_live.MARKET
+            final_price = 0.0
+        else:
+            # === BUY ORDERS: Fetch LTP + add 1% buffer for safe entry ===
+            print(f"🔍 Fetching Precise LTP for {sec_id} via Data API...")
+            try:
+                seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
+                securities = {seg_key: [int(sec_id)]}
                 
-                ltp = float(id_data.get('last_price', 0))
-                if ltp > 0:
-                    final_price = ltp
-                    dhan_order_type = dhan_live.LIMIT
-                    print(f"🎯 LTP Found: {final_price}. Changing to EXACT LIMIT order.")
+                quote = dhan_live.ticker_data(securities)
+                print(f"📊 Raw Ticker Response: {quote}")
+                
+                if isinstance(quote, dict) and quote.get('status') == 'success':
+                    outer_data = quote.get('data', {})
+                    inner_data = outer_data.get('data', {})
+                    seg_data = inner_data.get(seg_key, {})
+                    id_data = seg_data.get(str(sec_id), {})
+                    
+                    ltp = float(id_data.get('last_price', 0))
+                    if ltp > 0:
+                        # Add 1% buffer above LTP so order doesn't fail due to stale price
+                        buffered_price = round(ltp * 1.01, 2)
+                        final_price = buffered_price
+                        dhan_order_type = dhan_live.LIMIT
+                        print(f"🎯 LTP: {ltp} → Buffered Buy Price: {final_price} (+1%). Using LIMIT order.")
+                    else:
+                        print("⚠️ LTP was 0. Falling back to Market (Protection).")
                 else:
-                    print("⚠️ LTP was 0. Falling back to Market (Protection).")
-            else:
-                print("⚠️ Data API failed (Maybe not Subscribed). Falling back to Market (Protection).")
-        except Exception as e:
-            print(f"⚠️ Error fetching LTP: {e}. Falling back to Market.")
+                    print("⚠️ Data API failed (Maybe not Subscribed). Falling back to Market (Protection).")
+            except Exception as e:
+                print(f"⚠️ Error fetching LTP: {e}. Falling back to Market.")
         
-        print(f"🚀 Firing {dhan_order_type} order for ID: {sec_id} at price: {final_price}")
+        print(f"🚀 Firing {'MARKET' if dhan_order_type == dhan_live.MARKET else 'LIMIT'} order for ID: {sec_id} | Side: {side_str} | Price: {final_price}")
 
         # Place order using strictly verified params
         response = dhan_live.place_order(
