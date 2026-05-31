@@ -2,6 +2,10 @@ import os
 import json
 import subprocess
 import traceback
+import datetime
+import time
+import uuid
+import csv
 import pandas as pd
 from flask import Flask, request, jsonify, render_template_string
 from dhanhq import dhanhq, DhanContext
@@ -119,12 +123,41 @@ def save_and_deploy(config_data):
     
     return steps
 
-# Initial sync with Dhan Master Scrip List
-print("Syncing with Dhan Master Scrip List...")
-df = pd.read_csv(SCRIP_URL, low_memory=False)
+# In-Memory sync with Dhan Master Scrip List
+df = None
+last_scrip_load_date = None
+
+def get_ist_now():
+    return datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=30)
+
+def load_scrip_master():
+    global df, last_scrip_load_date
+    today_ist = get_ist_now().date()
+    
+    if df is not None and last_scrip_load_date == today_ist:
+        return
+        
+    print(f"[Strictly In-Memory] Syncing with Dhan Master Scrip List for {today_ist}...")
+    try:
+        df = pd.read_csv(SCRIP_URL, low_memory=False)
+        last_scrip_load_date = today_ist
+        print(f"Dhan Scrip Master loaded in memory. Size: {len(df)} rows.")
+    except Exception as e:
+        print(f"Error loading Dhan Scrip Master directly from URL: {e}")
+        if df is not None:
+            print("Warning: Keeping existing in-memory Scrip Master as fallback.")
+        else:
+            raise e
+
+# Initial load on startup
+try:
+    load_scrip_master()
+except Exception as e:
+    print(f"Warning: Direct startup scrip load failed (will retry on webhook): {e}")
 
 def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
     try:
+        load_scrip_master() # Ensure in-memory dataframe is fresh for today
         symbol = symbol.upper()
         # --- DYNAMIC ATM/ITM LOGIC ---
         if "-ATM" in symbol or "-ITM" in symbol:
@@ -135,8 +168,8 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
                 strike = float(manual_strike)
             else:
                 if price == 0:
-                    print(f"❌ Error: price=0 received for {symbol} request.")
-                    return None, None
+                    print(f"Error: price=0 received for {symbol} request.")
+                    return None, None, None, None
                 # Calculate Strike (Step of 100 for BankNifty, 50 for Nifty)
                 step = 100 if "BANKNIFTY" in base else 50
                 strike = round(price / step) * step
@@ -154,7 +187,7 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
                     if option_type == 'CE': strike -= (step * multiplier)
                     else: strike += (step * multiplier)
 
-            print(f"🎯 Using {symbol} logic for {base}: Strike {strike}")
+            print(f"[ATM/ITM] Using {symbol} logic for {base}: Strike {strike}")
             
             # Find the option with this strike and nearest expiry
             match = df[(df['SEM_INSTRUMENT_NAME'] == 'OPTIDX') & 
@@ -165,8 +198,8 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
                         (df['SEM_TRADING_SYMBOL'].str.contains(base, case=False, na=False)))]
             
             if match.empty:
-                print(f"⚠️ No strike {strike} found for {base}.")
-                return None, None
+                print(f"Warning: No strike {strike} found for {base}.")
+                return None, None, None, None
             
         elif symbol.endswith('-I'):
             base = symbol.replace('-I', '')
@@ -190,8 +223,8 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
                 match = match.dropna(subset=['expiry_dt']).sort_values('expiry_dt')
             
             if match.empty:
-                print(f"⚠️ No ACTIVE (unexpired) strike {symbol} found.")
-                return None, None
+                print(f"Warning: No ACTIVE (unexpired) strike {symbol} found.")
+                return None, None, None, None
 
             # Use the first active match
             row = match.iloc[0]
@@ -199,17 +232,79 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
             inst_name = str(row['SEM_INSTRUMENT_NAME'])
             final_symbol = str(row['SEM_TRADING_SYMBOL'])
             expiry = str(row['SEM_EXPIRY_DATE'])
+            strike = float(row.get('SEM_STRIKE_PRICE', 0))
+            base_symbol = str(row.get('SEM_CUSTOM_SYMBOL', '') or row.get('SM_SYMBOL_NAME', '') or symbol.split("-")[0])
             
-            print(f"✅ Found: {final_symbol} | ID: {sec_id} | Expiry: {expiry}")
-            return sec_id, inst_name
+            print(f"Found: {final_symbol} | ID: {sec_id} | Expiry: {expiry} | Strike: {strike} | Base: {base_symbol}")
+            return sec_id, inst_name, strike, base_symbol
         else:
-            print(f"❌ Symbol {symbol} not found.")
-            return None, None
+            print(f"Symbol {symbol} not found.")
+            return None, None, None, None
     except Exception as e:
         print(f"Lookup Error: {e}")
-        return None, None
+        return None, None, None, None
+
+# --- CSV TRADE JOURNAL UTILITIES ---
+JOURNAL_FILE = "trade_journal.csv"
+
+def init_journal():
+    if not os.path.exists(JOURNAL_FILE):
+        try:
+            with open(JOURNAL_FILE, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "trade_id", "symbol", "option_type", "strike", "quantity",
+                    "buy_time", "buy_price", "sell_time", "sell_price", "p_l",
+                    "status", "buy_order_id", "sell_order_id", "remarks"
+                ])
+            print("Initialized fresh trade_journal.csv")
+        except Exception as e:
+            print(f"Error initializing trade_journal.csv: {e}")
+
+def get_all_trades():
+    init_journal()
+    trades = []
+    if os.path.exists(JOURNAL_FILE):
+        try:
+            with open(JOURNAL_FILE, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    trades.append(row)
+        except Exception as e:
+            print(f"Error reading trade_journal.csv: {e}")
+    return trades
+
+def save_all_trades(trades):
+    try:
+        with open(JOURNAL_FILE, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "trade_id", "symbol", "option_type", "strike", "quantity",
+                "buy_time", "buy_price", "sell_time", "sell_price", "p_l",
+                "status", "buy_order_id", "sell_order_id", "remarks"
+            ])
+            for t in trades:
+                writer.writerow([
+                    t.get("trade_id", ""),
+                    t.get("symbol", ""),
+                    t.get("option_type", ""),
+                    t.get("strike", ""),
+                    t.get("quantity", ""),
+                    t.get("buy_time", ""),
+                    t.get("buy_price", ""),
+                    t.get("sell_time", ""),
+                    t.get("sell_price", ""),
+                    t.get("p_l", ""),
+                    t.get("status", ""),
+                    t.get("buy_order_id", ""),
+                    t.get("sell_order_id", ""),
+                    t.get("remarks", "")
+                ])
+    except Exception as e:
+        print(f"Error saving trade_journal.csv: {e}")
 
 # --- API ROUTES ---
+
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -217,7 +312,7 @@ def webhook():
     config = load_config()
     
     if not data or data.get('secret') != config.get('SECRET_TOKEN', 'JunnarTrader2026'):
-        print(f"🔴 403 ERROR! Unauthorized request.")
+        print(f"403 ERROR! Unauthorized request.")
         return jsonify({"status": "error", "remarks": "Unauthorized"}), 403
 
     symbol = data.get('symbol')
@@ -225,17 +320,12 @@ def webhook():
     option_type = data.get('option_type', 'CE').upper()
     manual_strike = data.get('itm_strike')
 
-    # Resolve exact Security ID and Instrument Type
-    sec_id, inst_name = get_security_id(symbol, price, option_type, manual_strike)
+    # Resolve exact Security ID, Instrument Type, Strike, and Base Symbol
+    sec_id, inst_name, strike, base_symbol = get_security_id(symbol, price, option_type, manual_strike)
     
     if not sec_id:
+        print(f"Webhook resolution failed: Symbol {symbol} not found.")
         return jsonify({"status": "error", "remarks": "Symbol not found"}), 400
-
-    # FORCE CORRECT SEGMENT
-    if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK']:
-        exch_seg = dhan.NSE_FNO
-    else:
-        exch_seg = dhan.NSE
 
     order_type_str = data.get('order_type', 'MARKET').upper()
     side_str = data.get('side', 'BUY').upper()
@@ -245,62 +335,214 @@ def webhook():
         dhan_context = DhanContext(client_id=config['CLIENT_ID'], access_token=config['ACCESS_TOKEN'])
         dhan_live = dhanhq(dhan_context)
         
+        # FORCE CORRECT SEGMENT
+        if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK']:
+            exch_seg = dhan_live.NSE_FNO
+        else:
+            exch_seg = dhan_live.NSE
+
         dhan_order_type = dhan_live.MARKET
         final_price = 0.0
         
+        # --- Fetch exact LTP for precise limit orders or simulated fallback ---
+        print(f"Fetching Precise Option LTP for ID: {sec_id} via Data API...")
+        option_ltp = 0.0
+        try:
+            seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
+            securities = {seg_key: [int(sec_id)]}
+            quote = dhan_live.ticker_data(securities)
+            print(f"Raw Ticker Response: {quote}")
+            if isinstance(quote, dict) and quote.get('status') == 'success':
+                outer_data = quote.get('data', {})
+                inner_data = outer_data.get('data', {})
+                seg_data = inner_data.get(seg_key, {})
+                id_data = seg_data.get(str(sec_id), {})
+                ltp = float(id_data.get('last_price', 0))
+                if ltp > 0:
+                    option_ltp = ltp
+                    print(f"Exact Option LTP: {option_ltp}")
+        except Exception as e:
+            print(f"Error fetching option LTP: {e}")
+
+        # === BUY ORDERS: Use exact LTP via LIMIT order ===
+        if side_str == 'BUY':
+            if option_ltp > 0:
+                final_price = option_ltp
+                dhan_order_type = dhan_live.LIMIT
+                print(f"Precise Entry: Using LIMIT order at exact LTP: {final_price}")
+            else:
+                dhan_order_type = dhan_live.MARKET
+                print("Warning: LTP not available. Falling back to MARKET for entry.")
         # === SELL ORDERS: Always use MARKET for guaranteed exit ===
-        if side_str == 'SELL':
-            print(f"📤 SELL detected — Using MARKET order for guaranteed exit.")
+        else:
+            print(f"EXIT detected — Using MARKET order for guaranteed exit.")
             dhan_order_type = dhan_live.MARKET
             final_price = 0.0
-        else:
-            # === BUY ORDERS: Fetch exact LTP for precise entry ===
-            print(f"🔍 Fetching Precise LTP for {sec_id} via Data API...")
-            try:
-                seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
-                securities = {seg_key: [int(sec_id)]}
-                
-                quote = dhan_live.ticker_data(securities)
-                print(f"📊 Raw Ticker Response: {quote}")
-                
-                if isinstance(quote, dict) and quote.get('status') == 'success':
-                    outer_data = quote.get('data', {})
-                    inner_data = outer_data.get('data', {})
-                    seg_data = inner_data.get(seg_key, {})
-                    id_data = seg_data.get(str(sec_id), {})
-                    
-                    ltp = float(id_data.get('last_price', 0))
-                    if ltp > 0:
-                        final_price = ltp
-                        dhan_order_type = dhan_live.LIMIT
-                        print(f"🎯 Exact LTP: {final_price}. Using LIMIT order.")
-                    else:
-                        print("⚠️ LTP was 0. Falling back to Market (Protection).")
-                else:
-                    print("⚠️ Data API failed (Maybe not Subscribed). Falling back to Market (Protection).")
-            except Exception as e:
-                print(f"⚠️ Error fetching LTP: {e}. Falling back to Market.")
         
-        print(f"🚀 Firing {'MARKET' if dhan_order_type == dhan_live.MARKET else 'LIMIT'} order for ID: {sec_id} | Side: {side_str} | Price: {final_price}")
+        quantity_val = int(data.get('quantity', 30))
+        print(f"Firing {'MARKET' if dhan_order_type == dhan_live.MARKET else 'LIMIT'} order | ID: {sec_id} | Side: {side_str} | Price: {final_price} | Qty: {quantity_val}")
 
-        # Place order using strictly verified params
-        response = dhan_live.place_order(
-            security_id=int(sec_id),
-            exchange_segment=exch_seg,
-            transaction_type=dhan_live.BUY if side_str == 'BUY' else dhan_live.SELL,
-            quantity=int(data.get('quantity', 0)),
-            order_type=dhan_order_type,
-            product_type=dhan_live.MARGIN, 
-            price=float(final_price),
-            after_market_order=False 
-        )
+        response = {}
+        order_placed = False
+        error_msg = ""
         
-        print(f"📡 Dhan API Order Response: {response}")
-        return jsonify(response), 200
+        try:
+            # Place order on Dhan API
+            response = dhan_live.place_order(
+                security_id=int(sec_id),
+                exchange_segment=exch_seg,
+                transaction_type=dhan_live.BUY if side_str == 'BUY' else dhan_live.SELL,
+                quantity=quantity_val,
+                order_type=dhan_order_type,
+                product_type=dhan_live.MARGIN, 
+                price=float(final_price),
+                after_market_order=False 
+            )
+            print(f"Dhan API Order Response: {response}")
+            if isinstance(response, dict) and response.get('status') == 'success':
+                order_placed = True
+            else:
+                error_msg = response.get('remarks', {}).get('error_message') or response.get('remarks') or "Dhan rejection"
+        except Exception as ex:
+            error_msg = str(ex)
+            print(f"Dhan API place_order exception: {ex}")
+
+        # --- POLL ORDER STATUS ---
+        order_id = ""
+        order_status = "REJECTED"
+        avg_price = 0.0
+        
+        if order_placed:
+            order_id = response.get('data', {}).get('orderId', '')
+            if order_id:
+                print(f"Polling Dhan API for status of Order ID {order_id}...")
+                for attempt in range(5):
+                    time.sleep(0.5)
+                    try:
+                        order_desc = dhan_live.get_order_by_id(order_id)
+                        if order_desc.get('status') == 'success':
+                            order_data = order_desc.get('data', {})
+                            status_check = order_data.get('orderStatus', '')
+                            if status_check:
+                                order_status = status_check
+                                avg_price = float(order_data.get('averageTradedPrice', 0))
+                                error_msg = order_data.get('rejectReason', '') or error_msg
+                                print(f"   -> Attempt {attempt+1}: Status={order_status} | Price={avg_price}")
+                                if order_status in ['TRADED', 'REJECTED', 'CANCELLED']:
+                                    break
+                    except Exception as pe:
+                        print(f"   Warning: Polling attempt {attempt+1} error: {pe}")
+        else:
+            order_status = "REJECTED"
+            
+        print(f"Final Order Status: {order_status} | Executed Avg Price: {avg_price} | Rejection Reason: {error_msg}")
+
+        # --- TRADE JOURNAL LOGGING & P&L MATCHING ---
+        trades = get_all_trades()
+        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Determine if this is a real or simulated trade (e.g. no funds)
+        is_simulated = (order_status == "REJECTED" or not order_placed)
+        
+        # Final price to log: executed average or fallback to live LTP or TradingView price
+        trade_price = avg_price
+        if trade_price == 0.0:
+            trade_price = option_ltp if option_ltp > 0.0 else price
+            
+        if side_str == 'BUY':
+            # Create a new trade entry
+            trade_id = str(uuid.uuid4())[:8]
+            status_str = "OPEN" if not is_simulated else "OPEN (Simulated)"
+            remarks_str = f"Simulated: {error_msg}" if is_simulated else "Real Trade Opened"
+            
+            new_trade = {
+                "trade_id": trade_id,
+                "symbol": str(base_symbol),
+                "option_type": str(option_type),
+                "strike": str(strike),
+                "quantity": str(quantity_val),
+                "buy_time": now_str,
+                "buy_price": str(round(trade_price, 2)),
+                "sell_time": "",
+                "sell_price": "",
+                "p_l": "0.0",
+                "status": status_str,
+                "buy_order_id": order_id if not is_simulated else "SIMULATED",
+                "sell_order_id": "",
+                "remarks": remarks_str
+            }
+            trades.append(new_trade)
+            print(f"Logged Entry Trade: {trade_id} | Strike: {strike} | Price: {trade_price} | Status: {status_str}")
+            save_all_trades(trades)
+            
+        elif side_str == 'SELL':
+            # Match with the latest open trade of same option type (CE or PE)
+            matched_trade = None
+            for t in reversed(trades):
+                status_check = t.get('status', '')
+                if t.get('option_type') == option_type and status_check.startswith('OPEN'):
+                    matched_trade = t
+                    break
+                    
+            if matched_trade:
+                buy_p = float(matched_trade.get('buy_price', 0) or 0)
+                p_l_val = (trade_price - buy_p) * quantity_val
+                
+                # If either entry or exit was simulated, the whole trade is closed as simulated
+                entry_was_sim = matched_trade.get('status', '') == "OPEN (Simulated)" or matched_trade.get('buy_order_id') == "SIMULATED"
+                exit_was_sim = is_simulated
+                
+                status_str = "CLOSED" if (not entry_was_sim and not exit_was_sim) else "CLOSED (Simulated)"
+                remarks_str = ""
+                if entry_was_sim: remarks_str += "Sim Entry"
+                if exit_was_sim: remarks_str += (" & " if remarks_str else "") + f"Sim Exit ({error_msg})"
+                if not remarks_str: remarks_str = "Real Trade Closed"
+                
+                matched_trade['sell_time'] = now_str
+                matched_trade['sell_price'] = str(round(trade_price, 2))
+                matched_trade['p_l'] = str(round(p_l_val, 2))
+                matched_trade['status'] = status_str
+                matched_trade['sell_order_id'] = order_id if not exit_was_sim else "SIMULATED"
+                matched_trade['remarks'] = remarks_str
+                
+                print(f"Logged Exit Trade: {matched_trade['trade_id']} | Strike: {strike} | Price: {trade_price} | P&L: {p_l_val} | Status: {status_str}")
+                save_all_trades(trades)
+            else:
+                # Orphan exit
+                trade_id = str(uuid.uuid4())[:8]
+                status_str = "REJECTED" if is_simulated else "ORPHAN_EXIT"
+                remarks_str = f"Orphan Exit (No open {option_type} position found)"
+                if is_simulated:
+                    remarks_str += f" | Rejection: {error_msg}"
+                    
+                orphan_trade = {
+                    "trade_id": trade_id,
+                    "symbol": str(base_symbol),
+                    "option_type": str(option_type),
+                    "strike": str(strike),
+                    "quantity": str(quantity_val),
+                    "buy_time": "",
+                    "buy_price": "",
+                    "sell_time": now_str,
+                    "sell_price": str(round(trade_price, 2)),
+                    "p_l": "0.0",
+                    "status": status_str,
+                    "buy_order_id": "",
+                    "sell_order_id": order_id if not is_simulated else "SIMULATED",
+                    "remarks": remarks_str
+                }
+                trades.append(orphan_trade)
+                print(f"Warning: Logged Orphan Exit: {trade_id} | Strike: {strike} | Price: {trade_price}")
+                save_all_trades(trades)
+
+        if order_placed:
+            return jsonify(response), 200
+        else:
+            return jsonify({"status": "failed", "remarks": error_msg, "simulated": True}), 200
 
     except Exception as e:
         error_details = traceback.format_exc()
-        print(f"❌ Order Execution Error:\n{error_details}")
+        print(f"Order Execution Error:\n{error_details}")
         return jsonify({"error": str(e), "details": error_details}), 500
 
 # --- FRONTEND ROUTE & API ---
@@ -320,6 +562,7 @@ def admin_dashboard():
             :root {
                 --bg-deep: #03050a;
                 --card-glass: rgba(13, 17, 28, 0.7);
+                --card-border: rgba(255, 255, 255, 0.05);
                 --border-glow: rgba(121, 40, 202, 0.3);
                 --primary: #7928CA;
                 --secondary: #00DFD8;
@@ -864,6 +1107,178 @@ def admin_dashboard():
                 width: 100%;
                 max-width: 1200px;
             }
+
+            /* --- NEW P&L / LEDGER JOURNAL STYLING --- */
+            .journal-container {
+                display: flex;
+                flex-direction: column;
+                gap: 1.5rem;
+            }
+
+            .table-container {
+                background: var(--card-glass);
+                border: 1px solid var(--card-border);
+                border-radius: 24px;
+                padding: 2.5rem;
+                backdrop-filter: blur(20px);
+                box-shadow: var(--panel-shadow);
+                overflow-x: auto;
+            }
+
+            .table-header-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 2rem;
+                flex-wrap: wrap;
+                gap: 1rem;
+            }
+
+            .view-selector {
+                display: flex;
+                background: rgba(0, 0, 0, 0.4);
+                padding: 0.3rem;
+                border-radius: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.05);
+            }
+
+            .view-btn {
+                background: transparent;
+                border: none;
+                padding: 0.5rem 1.2rem;
+                border-radius: 9px;
+                font-size: 0.8rem;
+                font-weight: 600;
+                color: var(--text-dim);
+                cursor: pointer;
+                transition: all 0.3s;
+                flex: none;
+            }
+
+            .view-btn.active {
+                background: var(--primary);
+                color: #fff;
+                box-shadow: 0 4px 12px rgba(121, 40, 202, 0.4);
+            }
+
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 1.5rem;
+            }
+
+            .stat-card {
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 20px;
+                padding: 1.5rem;
+                backdrop-filter: blur(20px);
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+                position: relative;
+                overflow: hidden;
+                box-shadow: inset 0 2px 10px rgba(255, 255, 255, 0.01);
+                transition: all 0.3s ease;
+            }
+
+            .stat-card::before {
+                content: '';
+                position: absolute;
+                top: 0; left: 0; width: 4px; height: 100%;
+                background: var(--text-dim);
+            }
+
+            .stat-card.stat-profit::before { background: var(--success); }
+            .stat-card.stat-loss::before { background: var(--error); }
+            .stat-card.stat-neutral::before { background: var(--secondary); }
+
+            .stat-card.stat-profit {
+                box-shadow: 0 0 20px rgba(16, 185, 129, 0.05);
+                border-color: rgba(16, 185, 129, 0.15);
+            }
+
+            .stat-card.stat-loss {
+                box-shadow: 0 0 20px rgba(239, 68, 68, 0.05);
+                border-color: rgba(239, 68, 68, 0.15);
+            }
+
+            .stat-card.stat-active {
+                box-shadow: 0 0 20px rgba(0, 223, 216, 0.08);
+                border-color: rgba(0, 223, 216, 0.2);
+            }
+
+            .stat-label {
+                font-size: 0.75rem;
+                font-weight: 700;
+                color: var(--text-dim);
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+            }
+
+            .stat-value {
+                font-family: 'Outfit', sans-serif;
+                font-size: 1.8rem;
+                font-weight: 800;
+                color: #fff;
+            }
+
+            .stat-value.profit {
+                color: var(--success);
+                text-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+            }
+
+            .stat-value.loss {
+                color: var(--error);
+                text-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+            }
+
+            .journal-table {
+                width: 100%;
+                border-collapse: collapse;
+                text-align: left;
+                font-size: 0.9rem;
+            }
+
+            .journal-table th {
+                padding: 1rem;
+                color: var(--text-dim);
+                font-weight: 600;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                text-transform: uppercase;
+                font-size: 0.75rem;
+                letter-spacing: 0.05em;
+            }
+
+            .journal-table td {
+                padding: 1.2rem 1rem;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+                color: #fff;
+                vertical-align: middle;
+            }
+
+            .journal-table tr:hover td {
+                background: rgba(255, 255, 255, 0.02);
+            }
+
+            .badge {
+                display: inline-flex;
+                align-items: center;
+                padding: 0.25rem 0.75rem;
+                border-radius: 100px;
+                font-size: 0.75rem;
+                font-weight: 700;
+                letter-spacing: 0.03em;
+            }
+
+            .badge-buy { background: rgba(16, 185, 129, 0.1); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.2); }
+            .badge-sell { background: rgba(239, 68, 68, 0.1); color: var(--error); border: 1px solid rgba(239, 68, 68, 0.2); }
+            .badge-open { background: rgba(0, 223, 216, 0.1); color: var(--secondary); border: 1px solid rgba(0, 223, 216, 0.2); box-shadow: 0 0 10px rgba(0, 223, 216, 0.1); }
+            .badge-closed { background: rgba(255, 255, 255, 0.05); color: var(--text-dim); border: 1px solid rgba(255, 255, 255, 0.1); }
+            .badge-rejected { background: rgba(239, 68, 68, 0.05); color: #64748b; border: 1px solid rgba(255, 255, 255, 0.05); cursor: help; }
+
+            .profit { color: var(--success) !important; }
+            .loss { color: var(--error) !important; }
         </style>
     </head>
     <body>
@@ -952,11 +1367,73 @@ def admin_dashboard():
                 </div>
                 <div class="console-area" id="terminal-logs">Establishing link to neural stream...</div>
             </div>
-        </div>
+            </div> <!-- End of main-container -->
 
-        <footer>
-            &copy; 2026 Duocore Softwares | Regal Algo Engine v4.6
-        </footer>
+            <!-- P&L and Trade Journal Section -->
+            <div class="journal-container" style="width: 100%; max-width: 1200px; margin-top: 2.5rem; z-index: 10; animation: fadeInUp 1s ease-out 0.4s both;">
+                <div class="table-container">
+                    <div class="table-header-row">
+                        <div class="card-title" style="margin-bottom: 0;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                            Quant Ledger & P&L Stream
+                        </div>
+                        <div class="view-selector">
+                            <button type="button" class="view-btn" data-view="real" onclick="setView('real')">Real Money</button>
+                            <button type="button" class="view-btn active" data-view="simulated" onclick="setView('simulated')">Simulated (Paper)</button>
+                        </div>
+                    </div>
+
+                    <!-- Statistics Cards Grid inside the container -->
+                    <div class="stats-grid" style="margin-bottom: 2rem;">
+                        <div class="stat-card" id="card-today-pl">
+                            <span class="stat-label">Today's P&L</span>
+                            <span class="stat-value" id="stat-today-pl">₹0.00</span>
+                        </div>
+                        <div class="stat-card" id="card-total-pl">
+                            <span class="stat-label">Net Realized P&L</span>
+                            <span class="stat-value" id="stat-total-pl">₹0.00</span>
+                        </div>
+                        <div class="stat-card stat-neutral" id="card-win-rate">
+                            <span class="stat-label">Quant Win Rate</span>
+                            <span class="stat-value" id="stat-win-rate">0.0%</span>
+                            <span style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;" id="stat-trades-count">0 Closed</span>
+                        </div>
+                        <div class="stat-card stat-neutral" id="card-active-position">
+                            <span class="stat-label">Active Position</span>
+                            <span class="stat-value" id="stat-active-position" style="font-size: 1.25rem; font-family: sans-serif; font-weight: 600; letter-spacing: normal; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">NONE</span>
+                        </div>
+                    </div>
+
+                    <!-- Historical Trade Journal Table -->
+                    <div style="overflow-x: auto; width: 100%;">
+                        <table class="journal-table">
+                            <thead>
+                                <tr>
+                                    <th>Entry Time</th>
+                                    <th>Contract Symbol</th>
+                                    <th>Side / Qty</th>
+                                    <th>Avg Entry</th>
+                                    <th>Avg Exit</th>
+                                    <th>P&L (₹)</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="journal-tbody">
+                                <tr>
+                                    <td colspan="7" style="text-align: center; color: var(--text-dim); padding: 3rem;">
+                                        Loading ledger data...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <footer>
+                &copy; 2026 Duocore Softwares | Regal Algo Engine v4.6
+            </footer>
+        </div>
 
         <div class="toast" id="toast-notif">
             <span id="toast-text"></span>
@@ -964,6 +1441,8 @@ def admin_dashboard():
 
         <script>
             let adminPin = "";
+            let activeView = "simulated"; // 'real' or 'simulated'
+            let tradesData = null;
 
             function moveFocus(el, index) {
                 if (el.value.length === 1 && index < 4) {
@@ -987,6 +1466,8 @@ def admin_dashboard():
                     document.getElementById('main-content').style.display = 'block';
                     fetchConfig();
                     setInterval(fetchLogs, 2000);
+                    setInterval(fetchTrades, 3000);
+                    fetchTrades();
                 } else {
                     document.getElementById('pin-error').style.display = 'block';
                     // Clear inputs
@@ -1044,8 +1525,8 @@ def admin_dashboard():
                 saveBtnText.innerText = 'Syncing...';
 
                 const now = new Date().toLocaleTimeString();
-                logArea.innerHTML = `<span style="color:var(--secondary)">[${now}]</span> 🚀 <span style="color:#fff; font-weight:bold;">INITIALIZING QUANT DEPLOYMENT...</span>\\n`;
-                logArea.innerHTML += `<span style="color:#64748b">---------------------------------------------------</span>\\n`;
+                logArea.innerHTML = `<span style="color:var(--secondary)">[${now}]</span> 🚀 <span style="color:#fff; font-weight:bold;">INITIALIZING QUANT DEPLOYMENT...</span>\n`;
+                logArea.innerHTML += `<span style="color:#64748b">---------------------------------------------------</span>\n`;
                 logArea.scrollTop = logArea.scrollHeight;
 
                 const payload = {
@@ -1068,11 +1549,11 @@ def admin_dashboard():
                         result.pipeline.forEach((step, i) => {
                             const icon = step.status === 'success' ? '✅' : '❌';
                             const color = step.status === 'success' ? 'var(--success)' : 'var(--error)';
-                            text += `<span style="color:${color}">${icon} Step ${i+1}: ${step.step}</span>\\n`;
-                            text += `   <span style="color:#64748b">↳ ${step.detail}</span>\\n\\n`;
+                            text += `<span style="color:${color}">${icon} Step ${i+1}: ${step.step}</span>\n`;
+                            text += `   <span style="color:#64748b">↳ ${step.detail}</span>\n\n`;
                         });
                         const endTime = new Date().toLocaleTimeString();
-                        text += `<span style="color:#64748b">---------------------------------------------------</span>\\n`;
+                        text += `<span style="color:#64748b">---------------------------------------------------</span>\n`;
                         text += `<span style="color:var(--secondary)">[${endTime}]</span> 🎉 <span style="color:#fff;">QUANT SYSTEMS SECURED & DEPLOYED.</span>`;
                         logArea.innerHTML = text;
                         logArea.scrollTop = logArea.scrollHeight;
@@ -1126,6 +1607,149 @@ def admin_dashboard():
                     }
                     if (isScrolledToBottom) logArea.scrollTop = logArea.scrollHeight;
                 } catch(e) {}
+            }
+
+            async function fetchTrades() {
+                try {
+                    const res = await fetch('/api/trades');
+                    const data = await res.json();
+                    if(data.status === 'success') {
+                        tradesData = data;
+                        renderTrades();
+                    }
+                } catch(e) {
+                    console.error("Error fetching trades:", e);
+                }
+            }
+
+            function setView(view) {
+                activeView = view;
+                document.querySelectorAll('.view-btn').forEach(btn => {
+                    if (btn.getAttribute('data-view') === view) {
+                        btn.classList.add('active');
+                    } else {
+                        btn.classList.remove('active');
+                    }
+                });
+                renderTrades();
+            }
+
+            function renderTrades() {
+                if(!tradesData) return;
+                
+                const s = tradesData.summary;
+                const isReal = activeView === 'real';
+                
+                // Update stats
+                const todayPlEl = document.getElementById('stat-today-pl');
+                const totalPlEl = document.getElementById('stat-total-pl');
+                const winRateEl = document.getElementById('stat-win-rate');
+                const countEl = document.getElementById('stat-trades-count');
+                
+                const todayPl = isReal ? s.today_real_p_l : s.today_sim_p_l;
+                const totalPl = isReal ? s.real_p_l : s.sim_p_l;
+                const winRate = isReal ? s.real_win_rate : s.sim_win_rate;
+                const count = isReal ? s.real_closed_count : s.sim_closed_count;
+                
+                // Formatted outputs
+                todayPlEl.innerText = (todayPl >= 0 ? "₹" : "-₹") + Math.abs(todayPl).toFixed(2);
+                todayPlEl.className = "stat-value " + (todayPl > 0 ? "profit" : (todayPl < 0 ? "loss" : ""));
+                
+                totalPlEl.innerText = (totalPl >= 0 ? "₹" : "-₹") + Math.abs(totalPl).toFixed(2);
+                totalPlEl.className = "stat-value " + (totalPl > 0 ? "profit" : (totalPl < 0 ? "loss" : ""));
+                
+                // Color card borders/indicators
+                document.getElementById('card-today-pl').className = "stat-card " + (todayPl > 0 ? "stat-profit" : (todayPl < 0 ? "stat-loss" : "stat-neutral"));
+                document.getElementById('card-total-pl').className = "stat-card " + (totalPl > 0 ? "stat-profit" : (totalPl < 0 ? "stat-loss" : "stat-neutral"));
+                
+                winRateEl.innerText = winRate.toFixed(1) + "%";
+                countEl.innerText = count + " Closed";
+                
+                // Active Position Check
+                const activePosEl = document.getElementById('stat-active-position');
+                const activeCard = document.getElementById('card-active-position');
+                const openTrades = tradesData.trades.filter(t => t.status.includes("OPEN"));
+                const currentOpen = openTrades.find(t => {
+                    const isSimTrade = t.status.includes("Simulated") || t.buy_order_id === 'SIMULATED';
+                    return isReal ? !isSimTrade : isSimTrade;
+                });
+                
+                if (currentOpen) {
+                    activePosEl.innerText = `${currentOpen.option_type} (${parseFloat(currentOpen.strike)}) @ ₹${parseFloat(currentOpen.buy_price).toFixed(2)}`;
+                    activePosEl.title = `Symbol: ${currentOpen.symbol} | Strike: ${currentOpen.strike} | Qty: ${currentOpen.quantity}`;
+                    activeCard.className = "stat-card stat-active";
+                } else {
+                    activePosEl.innerText = "NONE";
+                    activePosEl.title = "";
+                    activeCard.className = "stat-card stat-neutral";
+                }
+                
+                // Render Table
+                const tbody = document.getElementById('journal-tbody');
+                tbody.innerHTML = "";
+                
+                const filteredTrades = tradesData.trades.filter(t => {
+                    const isSimTrade = t.status.includes("Simulated") || t.buy_order_id === 'SIMULATED' || t.sell_order_id === 'SIMULATED';
+                    return isReal ? !isSimTrade : isSimTrade;
+                });
+                
+                if (filteredTrades.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 3rem;">No trades recorded in this category. Signals will populate this area.</td></tr>`;
+                    return;
+                }
+                
+                filteredTrades.forEach(t => {
+                    const pl = parseFloat(t.p_l || 0);
+                    const isClosed = t.status.includes("CLOSED");
+                    const isOpen = t.status.includes("OPEN");
+                    const isRejected = t.status.includes("REJECTED") || t.status.includes("failed");
+                    
+                    let statusBadge = "";
+                    if (isOpen) statusBadge = `<span class="badge badge-open">OPEN</span>`;
+                    else if (isClosed) statusBadge = `<span class="badge badge-closed">CLOSED</span>`;
+                    else if (isRejected) statusBadge = `<span class="badge badge-rejected" title="${t.remarks || 'Order Rejected'}">REJECTED</span>`;
+                    else statusBadge = `<span class="badge badge-closed">${t.status}</span>`;
+                    
+                    let plText = "—";
+                    let plClass = "";
+                    if (isClosed) {
+                        plText = (pl >= 0 ? "+₹" : "-₹") + Math.abs(pl).toFixed(2);
+                        plClass = pl >= 0 ? "profit" : "loss";
+                    } else if (isOpen) {
+                        plText = "OPEN";
+                        plClass = "profit"; 
+                    }
+                    
+                    const buyTimeShort = t.buy_time ? t.buy_time.split(" ")[1] : "—";
+                    const buyDateShort = t.buy_time ? t.buy_time.split(" ")[0].substring(5) : "—"; // MM-DD
+                    
+                    const exitTimeStr = t.sell_time ? t.sell_time.split(" ")[1] : "—";
+                    
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>
+                                <div style="font-weight: 600;">${buyTimeShort}</div>
+                                <div style="font-size: 0.75rem; color: var(--text-dim);">${buyDateShort}</div>
+                            </td>
+                            <td>
+                                <div style="font-weight: 700; color: #fff;">${t.symbol} ${parseFloat(t.strike || 0)} ${t.option_type}</div>
+                                <div style="font-size: 0.75rem; color: var(--text-dim);">${t.buy_order_id === 'SIMULATED' ? 'Paper Trade' : t.buy_order_id}</div>
+                            </td>
+                            <td>
+                                <span class="badge badge-buy">BUY</span>
+                                <span style="font-weight: 600; margin-left: 0.5rem;">${t.quantity} Qty</span>
+                            </td>
+                            <td style="font-family: 'Fira Code', monospace; font-weight: 500;">₹${parseFloat(t.buy_price || 0).toFixed(2)}</td>
+                            <td style="font-family: 'Fira Code', monospace; font-weight: 500;">
+                                ${t.sell_price ? '₹' + parseFloat(t.sell_price).toFixed(2) : '—'}
+                            </td>
+                            <td style="font-family: 'Fira Code', monospace; font-weight: 700;" class="${plClass}">
+                                ${plText}
+                            </td>
+                            <td>${statusBadge}</td>
+                        </tr>
+                    `;
+                });
             }
 
             window.onload = () => {
@@ -1186,6 +1810,71 @@ def api_test_connection():
             return jsonify({"status": "failed", "error": err_msg}), 200
     except Exception as e:
         return jsonify({"status": "failed", "error": str(e)}), 200
+
+@app.route('/api/trades', methods=['GET'])
+def api_get_trades():
+    try:
+        trades = get_all_trades()
+        # Sort trades by newest first (reverse the list)
+        trades = trades[::-1]
+        
+        # Calculate summary statistics
+        real_p_l = 0.0
+        sim_p_l = 0.0
+        real_wins = 0
+        real_closed = 0
+        sim_wins = 0
+        sim_closed = 0
+        
+        for t in trades:
+            status = t.get('status', '')
+            p_l_val = float(t.get('p_l', 0.0) or 0.0)
+            
+            if "Simulated" in status or t.get('buy_order_id') == 'SIMULATED' or t.get('sell_order_id') == 'SIMULATED':
+                if "CLOSED" in status:
+                    sim_p_l += p_l_val
+                    sim_closed += 1
+                    if p_l_val > 0:
+                        sim_wins += 1
+            else:
+                if "CLOSED" in status:
+                    real_p_l += p_l_val
+                    real_closed += 1
+                    if p_l_val > 0:
+                        real_wins += 1
+                        
+        # Today's P&L calculation
+        today_str = get_ist_now().strftime("%Y-%m-%d")
+        today_real_p_l = 0.0
+        today_sim_p_l = 0.0
+        
+        for t in trades:
+            status = t.get('status', '')
+            p_l_val = float(t.get('p_l', 0.0) or 0.0)
+            sell_time = t.get('sell_time', '')
+            
+            if sell_time.startswith(today_str):
+                if "Simulated" in status or t.get('buy_order_id') == 'SIMULATED' or t.get('sell_order_id') == 'SIMULATED':
+                    today_sim_p_l += p_l_val
+                else:
+                    today_real_p_l += p_l_val
+                    
+        return jsonify({
+            "status": "success",
+            "trades": trades,
+            "summary": {
+                "real_p_l": round(real_p_l, 2),
+                "sim_p_l": round(sim_p_l, 2),
+                "today_real_p_l": round(today_real_p_l, 2),
+                "today_sim_p_l": round(today_sim_p_l, 2),
+                "real_win_rate": round((real_wins / real_closed * 100), 1) if real_closed > 0 else 0,
+                "sim_win_rate": round((sim_wins / sim_closed * 100), 1) if sim_closed > 0 else 0,
+                "real_closed_count": real_closed,
+                "sim_closed_count": sim_closed
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/logs', methods=['GET'])
 def api_get_logs():
