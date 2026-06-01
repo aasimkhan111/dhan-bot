@@ -319,6 +319,31 @@ def webhook():
     price = float(data.get('price', 0))
     option_type = data.get('option_type', 'CE').upper()
     manual_strike = data.get('itm_strike')
+    
+    order_type_str = data.get('order_type', 'MARKET').upper()
+    side_str = data.get('side', 'BUY').upper()
+
+    # === SELL STRIKE AUTO-MATCH ===
+    # For SELL orders: If no itm_strike provided, auto-match from trade journal
+    # so we sell the EXACT same option we bought (not a new ATM strike)
+    if side_str == 'SELL' and not manual_strike:
+        print(f"[SELL Auto-Match] No itm_strike in webhook. Searching trade journal for open {option_type} position...")
+        open_trades = get_all_trades()
+        matched_open = None
+        for t in reversed(open_trades):
+            if t.get('option_type') == option_type and t.get('status', '').startswith('OPEN'):
+                matched_open = t
+                break
+        
+        if matched_open:
+            journal_strike = matched_open.get('strike', '')
+            if journal_strike:
+                manual_strike = journal_strike
+                print(f"[SELL Auto-Match] ✅ Found open {option_type} position with Strike: {manual_strike} (Trade ID: {matched_open.get('trade_id')})")
+            else:
+                print(f"[SELL Auto-Match] ⚠️ Open trade found but no strike recorded. Falling back to dynamic calculation.")
+        else:
+            print(f"[SELL Auto-Match] ⚠️ No open {option_type} position in journal. Using dynamic strike calculation.")
 
     # Resolve exact Security ID, Instrument Type, Strike, and Base Symbol
     sec_id, inst_name, strike, base_symbol = get_security_id(symbol, price, option_type, manual_strike)
@@ -326,9 +351,6 @@ def webhook():
     if not sec_id:
         print(f"Webhook resolution failed: Symbol {symbol} not found.")
         return jsonify({"status": "error", "remarks": "Symbol not found"}), 400
-
-    order_type_str = data.get('order_type', 'MARKET').upper()
-    side_str = data.get('side', 'BUY').upper()
     
     try:
         # Initialize Dhan client dynamically to always use latest credentials
