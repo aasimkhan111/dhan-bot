@@ -306,53 +306,49 @@ def save_all_trades(trades):
 # --- API ROUTES ---
 
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    data = request.get_json(force=True, silent=True)
-    config = load_config()
-    
-    if not data or data.get('secret') != config.get('SECRET_TOKEN', 'JunnarTrader2026'):
-        print(f"403 ERROR! Unauthorized request.")
-        return jsonify({"status": "error", "remarks": "Unauthorized"}), 403
+import threading
 
-    symbol = data.get('symbol')
-    price = float(data.get('price', 0))
-    option_type = data.get('option_type', 'CE').upper()
-    manual_strike = data.get('itm_strike')
-    
-    order_type_str = data.get('order_type', 'MARKET').upper()
-    side_str = data.get('side', 'BUY').upper()
-
-    # === SELL STRIKE AUTO-MATCH ===
-    # For SELL orders: If no itm_strike provided, auto-match from trade journal
-    # so we sell the EXACT same option we bought (not a new ATM strike)
-    if side_str == 'SELL' and not manual_strike:
-        print(f"[SELL Auto-Match] No itm_strike in webhook. Searching trade journal for open {option_type} position...")
-        open_trades = get_all_trades()
-        matched_open = None
-        for t in reversed(open_trades):
-            if t.get('option_type') == option_type and t.get('status', '').startswith('OPEN'):
-                matched_open = t
-                break
-        
-        if matched_open:
-            journal_strike = matched_open.get('strike', '')
-            if journal_strike:
-                manual_strike = journal_strike
-                print(f"[SELL Auto-Match] ✅ Found open {option_type} position with Strike: {manual_strike} (Trade ID: {matched_open.get('trade_id')})")
-            else:
-                print(f"[SELL Auto-Match] ⚠️ Open trade found but no strike recorded. Falling back to dynamic calculation.")
-        else:
-            print(f"[SELL Auto-Match] ⚠️ No open {option_type} position in journal. Using dynamic strike calculation.")
-
-    # Resolve exact Security ID, Instrument Type, Strike, and Base Symbol
-    sec_id, inst_name, strike, base_symbol = get_security_id(symbol, price, option_type, manual_strike)
-    
-    if not sec_id:
-        print(f"Webhook resolution failed: Symbol {symbol} not found.")
-        return jsonify({"status": "error", "remarks": "Symbol not found"}), 400
-    
+def _process_order_async(data, config):
+    """Background worker: resolves strike, places order, polls status, logs trade.
+    Runs in a daemon thread so TradingView gets an instant 200 OK."""
     try:
+        symbol = data.get('symbol')
+        price = float(data.get('price', 0))
+        option_type = data.get('option_type', 'CE').upper()
+        manual_strike = data.get('itm_strike')
+        
+        order_type_str = data.get('order_type', 'MARKET').upper()
+        side_str = data.get('side', 'BUY').upper()
+
+        # === SELL STRIKE AUTO-MATCH ===
+        # For SELL orders: If no itm_strike provided, auto-match from trade journal
+        # so we sell the EXACT same option we bought (not a new ATM strike)
+        if side_str == 'SELL' and not manual_strike:
+            print(f"[SELL Auto-Match] No itm_strike in webhook. Searching trade journal for open {option_type} position...")
+            open_trades = get_all_trades()
+            matched_open = None
+            for t in reversed(open_trades):
+                if t.get('option_type') == option_type and t.get('status', '').startswith('OPEN'):
+                    matched_open = t
+                    break
+            
+            if matched_open:
+                journal_strike = matched_open.get('strike', '')
+                if journal_strike:
+                    manual_strike = journal_strike
+                    print(f"[SELL Auto-Match] ✅ Found open {option_type} position with Strike: {manual_strike} (Trade ID: {matched_open.get('trade_id')})")
+                else:
+                    print(f"[SELL Auto-Match] ⚠️ Open trade found but no strike recorded. Falling back to dynamic calculation.")
+            else:
+                print(f"[SELL Auto-Match] ⚠️ No open {option_type} position in journal. Using dynamic strike calculation.")
+
+        # Resolve exact Security ID, Instrument Type, Strike, and Base Symbol
+        sec_id, inst_name, strike, base_symbol = get_security_id(symbol, price, option_type, manual_strike)
+        
+        if not sec_id:
+            print(f"[BG] Webhook resolution failed: Symbol {symbol} not found.")
+            return
+
         # Initialize Dhan client dynamically to always use latest credentials
         dhan_context = DhanContext(client_id=config['CLIENT_ID'], access_token=config['ACCESS_TOKEN'])
         dhan_live = dhanhq(dhan_context)
@@ -557,15 +553,38 @@ def webhook():
                 print(f"Warning: Logged Orphan Exit: {trade_id} | Strike: {strike} | Price: {trade_price}")
                 save_all_trades(trades)
 
-        if order_placed:
-            return jsonify(response), 200
-        else:
-            return jsonify({"status": "failed", "remarks": error_msg, "simulated": True}), 200
+        print(f"[BG] ✅ Order processing complete for {side_str} {symbol}")
 
     except Exception as e:
         error_details = traceback.format_exc()
-        print(f"Order Execution Error:\n{error_details}")
-        return jsonify({"error": str(e), "details": error_details}), 500
+        print(f"[BG] Order Execution Error:\n{error_details}")
+
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Instant webhook handler — validates and responds in <500ms.
+    All heavy processing (scrip lookup, order, polling) runs in background thread."""
+    data = request.get_json(force=True, silent=True)
+    config = load_config()
+    
+    if not data or data.get('secret') != config.get('SECRET_TOKEN', 'JunnarTrader2026'):
+        print(f"403 ERROR! Unauthorized request.")
+        return jsonify({"status": "error", "remarks": "Unauthorized"}), 403
+
+    # Log what we received for debugging
+    side_str = data.get('side', 'BUY').upper()
+    symbol = data.get('symbol', '?')
+    print(f"⚡ Webhook received: {side_str} {symbol} — dispatching to background thread...")
+
+    # Fire-and-forget: launch order processing in a daemon background thread
+    worker = threading.Thread(target=_process_order_async, args=(data, config), daemon=True)
+    worker.start()
+
+    # Return 200 OK INSTANTLY to TradingView (< 100ms)
+    return jsonify({
+        "status": "received",
+        "remarks": f"{side_str} {symbol} accepted — processing in background"
+    }), 200
 
 # --- FRONTEND ROUTE & API ---
 
