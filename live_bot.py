@@ -362,8 +362,8 @@ def _process_order_async(data, config):
         dhan_order_type = dhan_live.MARKET
         final_price = 0.0
         
-        # --- Fetch exact LTP for precise limit orders or simulated fallback ---
-        print(f"Fetching Precise Option LTP for ID: {sec_id} via Data API...")
+        # --- Fetch LTP for trade journal logging ONLY (not for order placement) ---
+        print(f"Fetching Option LTP for ID: {sec_id} (for journal logging only)...")
         option_ltp = 0.0
         try:
             seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
@@ -382,23 +382,13 @@ def _process_order_async(data, config):
         except Exception as e:
             print(f"Error fetching option LTP: {e}")
 
-        # === BUY ORDERS: Use exact LTP via LIMIT order ===
-        if side_str == 'BUY':
-            if option_ltp > 0:
-                final_price = option_ltp
-                dhan_order_type = dhan_live.LIMIT
-                print(f"Precise Entry: Using LIMIT order at exact LTP: {final_price}")
-            else:
-                dhan_order_type = dhan_live.MARKET
-                print("Warning: LTP not available. Falling back to MARKET for entry.")
-        # === SELL ORDERS: Always use MARKET for guaranteed exit ===
-        else:
-            print(f"EXIT detected — Using MARKET order for guaranteed exit.")
-            dhan_order_type = dhan_live.MARKET
-            final_price = 0.0
+        # === ALL ORDERS: MARKET for guaranteed instant fill at current LTP ===
+        dhan_order_type = dhan_live.MARKET
+        final_price = 0.0
+        print(f"{side_str} order → MARKET (instant fill at current LTP)")
         
         quantity_val = int(data.get('quantity', 30))
-        print(f"Firing {'MARKET' if dhan_order_type == dhan_live.MARKET else 'LIMIT'} order | ID: {sec_id} | Side: {side_str} | Price: {final_price} | Qty: {quantity_val}")
+        print(f"Firing MARKET order | ID: {sec_id} | Side: {side_str} | Qty: {quantity_val}")
 
         response = {}
         order_placed = False
