@@ -359,11 +359,10 @@ def _process_order_async(data, config):
         else:
             exch_seg = dhan_live.NSE
 
-        dhan_order_type = dhan_live.MARKET
-        final_price = 0.0
-        
-        # --- Fetch LTP for trade journal logging ONLY (not for order placement) ---
-        print(f"Fetching Option LTP for ID: {sec_id} (for journal logging only)...")
+        SLIPPAGE_BUFFER = 2.0  # Max ₹2 slippage allowed
+
+        # --- Fetch Option LTP for LIMIT order pricing ---
+        print(f"Fetching Option LTP for ID: {sec_id}...")
         option_ltp = 0.0
         try:
             seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
@@ -378,17 +377,28 @@ def _process_order_async(data, config):
                 ltp = float(id_data.get('last_price', 0))
                 if ltp > 0:
                     option_ltp = ltp
-                    print(f"Exact Option LTP: {option_ltp}")
+                    print(f"Option LTP: ₹{option_ltp}")
         except Exception as e:
             print(f"Error fetching option LTP: {e}")
 
-        # === ALL ORDERS: MARKET for guaranteed instant fill at current LTP ===
-        dhan_order_type = dhan_live.MARKET
-        final_price = 0.0
-        print(f"{side_str} order → MARKET (instant fill at current LTP)")
+        # === LIMIT ORDER with ₹2 slippage cap (fallback to MARKET if LTP unavailable) ===
+        if option_ltp > 0:
+            dhan_order_type = dhan_live.LIMIT
+            if side_str == 'BUY':
+                # Cap buy price: won't pay more than LTP + ₹2
+                final_price = round(option_ltp + SLIPPAGE_BUFFER, 2)
+            else:
+                # Cap sell price: won't sell below LTP - ₹2
+                final_price = round(max(option_ltp - SLIPPAGE_BUFFER, 0.05), 2)
+            print(f"{side_str} order → LIMIT at ₹{final_price} (LTP ₹{option_ltp} ± ₹{SLIPPAGE_BUFFER} buffer)")
+        else:
+            # LTP fetch failed — fallback to MARKET to avoid missing the trade
+            dhan_order_type = dhan_live.MARKET
+            final_price = 0.0
+            print(f"⚠️ LTP unavailable — falling back to MARKET order (no slippage cap)")
         
         quantity_val = int(data.get('quantity', 30))
-        print(f"Firing MARKET order | ID: {sec_id} | Side: {side_str} | Qty: {quantity_val}")
+        print(f"Firing {('LIMIT ₹'+str(final_price)) if dhan_order_type == dhan_live.LIMIT else 'MARKET'} order | ID: {sec_id} | Side: {side_str} | Qty: {quantity_val}")
 
         response = {}
         order_placed = False
@@ -424,8 +434,10 @@ def _process_order_async(data, config):
             order_id = response.get('data', {}).get('orderId', '')
             if order_id:
                 print(f"Polling Dhan API for status of Order ID {order_id}...")
-                for attempt in range(5):
-                    time.sleep(0.5)
+                # Poll up to 8 times with increasing delays to catch the actual fill price
+                poll_delays = [0.3, 0.5, 0.5, 0.8, 1.0, 1.0, 1.5, 2.0]
+                for attempt in range(len(poll_delays)):
+                    time.sleep(poll_delays[attempt])
                     try:
                         order_desc = dhan_live.get_order_by_id(order_id)
                         if order_desc.get('status') == 'success':
@@ -435,9 +447,13 @@ def _process_order_async(data, config):
                                 order_status = status_check
                                 avg_price = float(order_data.get('averageTradedPrice', 0))
                                 error_msg = order_data.get('rejectReason', '') or error_msg
-                                print(f"   -> Attempt {attempt+1}: Status={order_status} | Price={avg_price}")
-                                if order_status in ['TRADED', 'REJECTED', 'CANCELLED']:
+                                print(f"   -> Attempt {attempt+1}: Status={order_status} | AvgTradedPrice={avg_price}")
+                                if order_status == 'TRADED' and avg_price > 0:
+                                    # Got real fill price — stop polling
                                     break
+                                elif order_status in ['REJECTED', 'CANCELLED']:
+                                    break
+                                # If TRADED but avg_price still 0, keep polling (exchange may not have updated yet)
                     except Exception as pe:
                         print(f"   Warning: Polling attempt {attempt+1} error: {pe}")
         else:
@@ -452,10 +468,35 @@ def _process_order_async(data, config):
         # Determine if this is a real or simulated trade (e.g. no funds)
         is_simulated = (order_status == "REJECTED" or not order_placed)
         
-        # Final price to log: executed average or fallback to live LTP or TradingView price
-        trade_price = avg_price
-        if trade_price == 0.0:
-            trade_price = option_ltp if option_ltp > 0.0 else price
+        # Final price to log:
+        # For REAL executed orders: ONLY use the actual Dhan execution price (averageTradedPrice)
+        # For SIMULATED/REJECTED orders: use the option LTP as a proxy for paper trading
+        # NEVER use TradingView's index price (that's the underlying, not the option premium!)
+        if order_status == 'TRADED' and avg_price > 0:
+            trade_price = avg_price
+            print(f"Journal Price: Using ACTUAL execution price ₹{trade_price}")
+        elif option_ltp > 0.0:
+            trade_price = option_ltp
+            print(f"Journal Price: Using option LTP ₹{trade_price} (order was {'simulated' if is_simulated else 'pending'})")
+        else:
+            # Last resort: re-fetch LTP right now
+            trade_price = 0.0
+            try:
+                seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
+                securities = {seg_key: [int(sec_id)]}
+                quote = dhan_live.ticker_data(securities)
+                if isinstance(quote, dict) and quote.get('status') == 'success':
+                    outer_data = quote.get('data', {})
+                    inner_data = outer_data.get('data', {})
+                    seg_data = inner_data.get(seg_key, {})
+                    id_data = seg_data.get(str(sec_id), {})
+                    trade_price = float(id_data.get('last_price', 0))
+            except Exception as e:
+                print(f"Warning: Re-fetch LTP failed: {e}")
+            
+            if trade_price == 0.0:
+                trade_price = price  # Absolute last resort — TradingView price
+                print(f"⚠️ Journal Price: Using TradingView index price ₹{price} as LAST RESORT (this is NOT the option price!)")
             
         if side_str == 'BUY':
             # Create a new trade entry
