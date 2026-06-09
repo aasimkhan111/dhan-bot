@@ -15,6 +15,12 @@ app = Flask(__name__)
 CONFIG_FILE = "config.json"
 SCRIP_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
 
+# --- PAPER TRADING MODE ---
+# When True: Bot logs paper trades using real LTP but does NOT place real orders on Dhan
+# When False: Bot places real orders on Dhan AND logs paper trades for comparison
+# Toggle this to switch between paper and live trading
+PAPER_TRADING_MODE = True
+
 # --- HELPER FUNCTIONS ---
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -303,6 +309,64 @@ def save_all_trades(trades):
     except Exception as e:
         print(f"Error saving trade_journal.csv: {e}")
 
+# --- PAPER TRADING JOURNAL ---
+PAPER_JOURNAL_FILE = "paper_journal.csv"
+
+def init_paper_journal():
+    if not os.path.exists(PAPER_JOURNAL_FILE):
+        try:
+            with open(PAPER_JOURNAL_FILE, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "trade_id", "symbol", "option_type", "strike", "quantity",
+                    "buy_time", "buy_price", "sell_time", "sell_price", "p_l",
+                    "status", "ltp_source", "remarks"
+                ])
+            print("Initialized fresh paper_journal.csv")
+        except Exception as e:
+            print(f"Error initializing paper_journal.csv: {e}")
+
+def get_all_paper_trades():
+    init_paper_journal()
+    trades = []
+    if os.path.exists(PAPER_JOURNAL_FILE):
+        try:
+            with open(PAPER_JOURNAL_FILE, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    trades.append(row)
+        except Exception as e:
+            print(f"Error reading paper_journal.csv: {e}")
+    return trades
+
+def save_all_paper_trades(trades):
+    try:
+        with open(PAPER_JOURNAL_FILE, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "trade_id", "symbol", "option_type", "strike", "quantity",
+                "buy_time", "buy_price", "sell_time", "sell_price", "p_l",
+                "status", "ltp_source", "remarks"
+            ])
+            for t in trades:
+                writer.writerow([
+                    t.get("trade_id", ""),
+                    t.get("symbol", ""),
+                    t.get("option_type", ""),
+                    t.get("strike", ""),
+                    t.get("quantity", ""),
+                    t.get("buy_time", ""),
+                    t.get("buy_price", ""),
+                    t.get("sell_time", ""),
+                    t.get("sell_price", ""),
+                    t.get("p_l", ""),
+                    t.get("status", ""),
+                    t.get("ltp_source", ""),
+                    t.get("remarks", "")
+                ])
+    except Exception as e:
+        print(f"Error saving paper_journal.csv: {e}")
+
 # --- API ROUTES ---
 
 
@@ -379,12 +443,14 @@ def _process_order_async(data, config):
         except Exception as e:
             print(f"Error fetching option LTP: {e}")
 
+        # === ORDER EXECUTION (Dhan REAL order + Paper trade both run) ===
+        quantity_val = int(data.get('quantity', 30))
+        
         # === MARKET ORDER — guaranteed instant fill at best available price ===
         # BankNifty ITM options are liquid → typical slippage is only ₹0.50–₹2
         dhan_order_type = dhan_live.MARKET
         final_price = 0.0
         
-        quantity_val = int(data.get('quantity', 30))
         print(f"Firing MARKET order | ID: {sec_id} | Side: {side_str} | Qty: {quantity_val} | Ref LTP: ₹{option_ltp}")
 
         response = {}
@@ -427,7 +493,7 @@ def _process_order_async(data, config):
                     time.sleep(poll_delays[attempt])
                     try:
                         order_desc = dhan_live.get_order_by_id(order_id)
-                        if order_desc.get('status') == 'success':
+                        if isinstance(order_desc, dict) and order_desc.get('status') == 'success':
                             order_data = order_desc.get('data', {})
                             status_check = order_data.get('orderStatus', '')
                             if status_check:
@@ -441,11 +507,14 @@ def _process_order_async(data, config):
                                 elif order_status in ['REJECTED', 'CANCELLED']:
                                     break
                                 # If TRADED but avg_price still 0, keep polling (exchange may not have updated yet)
+                        elif isinstance(order_desc, list):
+                            # Handle case where API returns a list instead of dict
+                            print(f"   Warning: Polling attempt {attempt+1}: API returned list, retrying...")
                     except Exception as pe:
                         print(f"   Warning: Polling attempt {attempt+1} error: {pe}")
         else:
             order_status = "REJECTED"
-            
+        
         print(f"Final Order Status: {order_status} | Executed Avg Price: {avg_price} | Rejection Reason: {error_msg}")
 
         # --- TRADE JOURNAL LOGGING & P&L MATCHING ---
@@ -570,6 +639,71 @@ def _process_order_async(data, config):
                 trades.append(orphan_trade)
                 print(f"Warning: Logged Orphan Exit: {trade_id} | Strike: {strike} | Price: {trade_price}")
                 save_all_trades(trades)
+
+        # === PAPER TRADING JOURNAL (runs ALWAYS for comparison) ===
+        paper_trades = get_all_paper_trades()
+        paper_price = option_ltp if option_ltp > 0 else trade_price
+        ltp_source = "ticker_data" if option_ltp > 0 else "fallback"
+        
+        if side_str == 'BUY':
+            paper_id = "P-" + str(uuid.uuid4())[:6]
+            paper_trade = {
+                "trade_id": paper_id,
+                "symbol": str(base_symbol),
+                "option_type": str(option_type),
+                "strike": str(strike),
+                "quantity": str(quantity_val),
+                "buy_time": now_str,
+                "buy_price": str(round(paper_price, 2)),
+                "sell_time": "",
+                "sell_price": "",
+                "p_l": "0.0",
+                "status": "OPEN",
+                "ltp_source": ltp_source,
+                "remarks": f"Paper entry at LTP ₹{paper_price}"
+            }
+            paper_trades.append(paper_trade)
+            save_all_paper_trades(paper_trades)
+            print(f"📝 [PAPER] Logged BUY: {paper_id} | Strike: {strike} | LTP: ₹{paper_price}")
+            
+        elif side_str == 'SELL':
+            # Match with latest open paper trade of same option type
+            matched_paper = None
+            for pt in reversed(paper_trades):
+                if pt.get('option_type') == option_type and pt.get('status') == 'OPEN':
+                    matched_paper = pt
+                    break
+            
+            if matched_paper:
+                buy_p = float(matched_paper.get('buy_price', 0) or 0)
+                paper_pl = (paper_price - buy_p) * quantity_val
+                matched_paper['sell_time'] = now_str
+                matched_paper['sell_price'] = str(round(paper_price, 2))
+                matched_paper['p_l'] = str(round(paper_pl, 2))
+                matched_paper['status'] = 'CLOSED'
+                matched_paper['remarks'] = f"Paper exit at LTP ₹{paper_price} | P&L: ₹{round(paper_pl, 2)}"
+                save_all_paper_trades(paper_trades)
+                print(f"📝 [PAPER] Logged SELL: {matched_paper['trade_id']} | Strike: {strike} | LTP: ₹{paper_price} | P&L: ₹{round(paper_pl, 2)}")
+            else:
+                paper_id = "P-" + str(uuid.uuid4())[:6]
+                orphan_paper = {
+                    "trade_id": paper_id,
+                    "symbol": str(base_symbol),
+                    "option_type": str(option_type),
+                    "strike": str(strike),
+                    "quantity": str(quantity_val),
+                    "buy_time": "",
+                    "buy_price": "",
+                    "sell_time": now_str,
+                    "sell_price": str(round(paper_price, 2)),
+                    "p_l": "0.0",
+                    "status": "ORPHAN",
+                    "ltp_source": ltp_source,
+                    "remarks": f"Paper orphan exit at LTP ₹{paper_price}"
+                }
+                paper_trades.append(orphan_paper)
+                save_all_paper_trades(paper_trades)
+                print(f"📝 [PAPER] Logged Orphan SELL: {paper_id} | Strike: {strike} | LTP: ₹{paper_price}")
 
         print(f"[BG] ✅ Order processing complete for {side_str} {symbol}")
 
@@ -1934,6 +2068,52 @@ def api_get_trades():
         }), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/paper-trades', methods=['GET'])
+def api_get_paper_trades():
+    try:
+        trades = get_all_paper_trades()
+        trades = trades[::-1]  # Newest first
+        
+        total_pl = 0.0
+        wins = 0
+        closed_count = 0
+        today_str = get_ist_now().strftime("%Y-%m-%d")
+        today_pl = 0.0
+        
+        for t in trades:
+            p_l_val = float(t.get('p_l', 0.0) or 0.0)
+            if t.get('status') == 'CLOSED':
+                total_pl += p_l_val
+                closed_count += 1
+                if p_l_val > 0:
+                    wins += 1
+                sell_time = t.get('sell_time', '')
+                if sell_time.startswith(today_str):
+                    today_pl += p_l_val
+        
+        return jsonify({
+            "status": "success",
+            "mode": "PAPER" if PAPER_TRADING_MODE else "LIVE",
+            "trades": trades,
+            "summary": {
+                "total_pl": round(total_pl, 2),
+                "today_pl": round(today_pl, 2),
+                "win_rate": round((wins / closed_count * 100), 1) if closed_count > 0 else 0,
+                "closed_count": closed_count,
+                "open_count": sum(1 for t in trades if t.get('status') == 'OPEN')
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/trading-mode', methods=['GET'])
+def api_trading_mode():
+    return jsonify({
+        "status": "success",
+        "mode": "PAPER" if PAPER_TRADING_MODE else "LIVE",
+        "paper_trading": PAPER_TRADING_MODE
+    }), 200
 
 @app.route('/api/logs', methods=['GET'])
 def api_get_logs():
