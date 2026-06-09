@@ -359,10 +359,8 @@ def _process_order_async(data, config):
         else:
             exch_seg = dhan_live.NSE
 
-        SLIPPAGE_BUFFER = 2.0  # Max ₹2 slippage allowed
-
-        # --- Fetch Option LTP for LIMIT order pricing ---
-        print(f"Fetching Option LTP for ID: {sec_id}...")
+        # --- Fetch Option LTP (for journal logging only, NOT for order pricing) ---
+        print(f"Fetching Option LTP for ID: {sec_id} (journal reference only)...")
         option_ltp = 0.0
         try:
             seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
@@ -377,28 +375,17 @@ def _process_order_async(data, config):
                 ltp = float(id_data.get('last_price', 0))
                 if ltp > 0:
                     option_ltp = ltp
-                    print(f"Option LTP: ₹{option_ltp}")
+                    print(f"Option LTP (reference): ₹{option_ltp}")
         except Exception as e:
             print(f"Error fetching option LTP: {e}")
 
-        # === LIMIT ORDER with ₹2 slippage cap (fallback to MARKET if LTP unavailable) ===
-        if option_ltp > 0:
-            dhan_order_type = dhan_live.LIMIT
-            if side_str == 'BUY':
-                # Cap buy price: won't pay more than LTP + ₹2
-                final_price = round(option_ltp + SLIPPAGE_BUFFER, 2)
-            else:
-                # Cap sell price: won't sell below LTP - ₹2
-                final_price = round(max(option_ltp - SLIPPAGE_BUFFER, 0.05), 2)
-            print(f"{side_str} order → LIMIT at ₹{final_price} (LTP ₹{option_ltp} ± ₹{SLIPPAGE_BUFFER} buffer)")
-        else:
-            # LTP fetch failed — fallback to MARKET to avoid missing the trade
-            dhan_order_type = dhan_live.MARKET
-            final_price = 0.0
-            print(f"⚠️ LTP unavailable — falling back to MARKET order (no slippage cap)")
+        # === MARKET ORDER — guaranteed instant fill at best available price ===
+        # BankNifty ITM options are liquid → typical slippage is only ₹0.50–₹2
+        dhan_order_type = dhan_live.MARKET
+        final_price = 0.0
         
         quantity_val = int(data.get('quantity', 30))
-        print(f"Firing {('LIMIT ₹'+str(final_price)) if dhan_order_type == dhan_live.LIMIT else 'MARKET'} order | ID: {sec_id} | Side: {side_str} | Qty: {quantity_val}")
+        print(f"Firing MARKET order | ID: {sec_id} | Side: {side_str} | Qty: {quantity_val} | Ref LTP: ₹{option_ltp}")
 
         response = {}
         order_placed = False
