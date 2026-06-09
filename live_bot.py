@@ -1572,7 +1572,8 @@ def admin_dashboard():
                         </div>
                         <div class="view-selector">
                             <button type="button" class="view-btn" data-view="real" onclick="setView('real')">Real Money</button>
-                            <button type="button" class="view-btn active" data-view="simulated" onclick="setView('simulated')">Simulated (Paper)</button>
+                            <button type="button" class="view-btn active" data-view="simulated" onclick="setView('simulated')">Simulated</button>
+                            <button type="button" class="view-btn" data-view="paper" onclick="setView('paper')" style="background: linear-gradient(135deg, rgba(255,165,0,0.15), rgba(255,165,0,0.05)); border-color: rgba(255,165,0,0.3);">📝 Paper Trades</button>
                         </div>
                     </div>
 
@@ -1634,8 +1635,9 @@ def admin_dashboard():
 
         <script>
             let adminPin = "";
-            let activeView = "simulated"; // 'real' or 'simulated'
+            let activeView = "simulated"; // 'real', 'simulated', or 'paper'
             let tradesData = null;
+            let paperTradesData = null;
 
             function moveFocus(el, index) {
                 if (el.value.length === 1 && index < 4) {
@@ -1660,7 +1662,9 @@ def admin_dashboard():
                     fetchConfig();
                     setInterval(fetchLogs, 2000);
                     setInterval(fetchTrades, 3000);
+                    setInterval(fetchPaperTrades, 3000);
                     fetchTrades();
+                    fetchPaperTrades();
                 } else {
                     document.getElementById('pin-error').style.display = 'block';
                     // Clear inputs
@@ -1815,6 +1819,19 @@ def admin_dashboard():
                 }
             }
 
+            async function fetchPaperTrades() {
+                try {
+                    const res = await fetch('/api/paper-trades');
+                    const data = await res.json();
+                    if(data.status === 'success') {
+                        paperTradesData = data;
+                        if(activeView === 'paper') renderTrades();
+                    }
+                } catch(e) {
+                    console.error("Error fetching paper trades:", e);
+                }
+            }
+
             function setView(view) {
                 activeView = view;
                 document.querySelectorAll('.view-btn').forEach(btn => {
@@ -1828,6 +1845,12 @@ def admin_dashboard():
             }
 
             function renderTrades() {
+                // === PAPER TRADES VIEW ===
+                if (activeView === 'paper') {
+                    renderPaperTrades();
+                    return;
+                }
+                
                 if(!tradesData) return;
                 
                 const s = tradesData.summary;
@@ -1930,6 +1953,113 @@ def admin_dashboard():
                             </td>
                             <td>
                                 <span class="badge badge-buy">BUY</span>
+                                <span style="font-weight: 600; margin-left: 0.5rem;">${t.quantity} Qty</span>
+                            </td>
+                            <td style="font-family: 'Fira Code', monospace; font-weight: 500;">₹${parseFloat(t.buy_price || 0).toFixed(2)}</td>
+                            <td style="font-family: 'Fira Code', monospace; font-weight: 500;">
+                                ${t.sell_price ? '₹' + parseFloat(t.sell_price).toFixed(2) : '—'}
+                            </td>
+                            <td style="font-family: 'Fira Code', monospace; font-weight: 700;" class="${plClass}">
+                                ${plText}
+                            </td>
+                            <td>${statusBadge}</td>
+                        </tr>
+                    `;
+                });
+            }
+
+            function renderPaperTrades() {
+                if(!paperTradesData) return;
+                
+                const s = paperTradesData.summary;
+                
+                // Update stats for paper trades
+                const todayPlEl = document.getElementById('stat-today-pl');
+                const totalPlEl = document.getElementById('stat-total-pl');
+                const winRateEl = document.getElementById('stat-win-rate');
+                const countEl = document.getElementById('stat-trades-count');
+                
+                const todayPl = s.today_pl || 0;
+                const totalPl = s.total_pl || 0;
+                const winRate = s.win_rate || 0;
+                const closedCount = s.closed_count || 0;
+                const openCount = s.open_count || 0;
+                
+                todayPlEl.innerText = (todayPl >= 0 ? "₹" : "-₹") + Math.abs(todayPl).toFixed(2);
+                todayPlEl.className = "stat-value " + (todayPl > 0 ? "profit" : (todayPl < 0 ? "loss" : ""));
+                
+                totalPlEl.innerText = (totalPl >= 0 ? "₹" : "-₹") + Math.abs(totalPl).toFixed(2);
+                totalPlEl.className = "stat-value " + (totalPl > 0 ? "profit" : (totalPl < 0 ? "loss" : ""));
+                
+                document.getElementById('card-today-pl').className = "stat-card " + (todayPl > 0 ? "stat-profit" : (todayPl < 0 ? "stat-loss" : "stat-neutral"));
+                document.getElementById('card-total-pl').className = "stat-card " + (totalPl > 0 ? "stat-profit" : (totalPl < 0 ? "stat-loss" : "stat-neutral"));
+                
+                winRateEl.innerText = winRate.toFixed(1) + "%";
+                countEl.innerText = closedCount + " Closed";
+                
+                // Active paper position
+                const activePosEl = document.getElementById('stat-active-position');
+                const activeCard = document.getElementById('card-active-position');
+                const openPaper = paperTradesData.trades.find(t => t.status === 'OPEN');
+                
+                if (openPaper) {
+                    activePosEl.innerText = `${openPaper.option_type} (${parseFloat(openPaper.strike)}) @ ₹${parseFloat(openPaper.buy_price).toFixed(2)}`;
+                    activePosEl.title = `Paper | Symbol: ${openPaper.symbol} | Strike: ${openPaper.strike} | LTP Source: ${openPaper.ltp_source || 'ticker'}`;
+                    activeCard.className = "stat-card stat-active";
+                } else {
+                    activePosEl.innerText = "NONE";
+                    activePosEl.title = "";
+                    activeCard.className = "stat-card stat-neutral";
+                }
+                
+                // Render paper trades table
+                const tbody = document.getElementById('journal-tbody');
+                tbody.innerHTML = "";
+                
+                const trades = paperTradesData.trades;
+                
+                if (!trades || trades.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 3rem;">📝 No paper trades yet. Waiting for TradingView signals...</td></tr>`;
+                    return;
+                }
+                
+                trades.forEach(t => {
+                    const pl = parseFloat(t.p_l || 0);
+                    const isClosed = t.status === 'CLOSED';
+                    const isOpen = t.status === 'OPEN';
+                    const isOrphan = t.status === 'ORPHAN';
+                    
+                    let statusBadge = "";
+                    if (isOpen) statusBadge = `<span class="badge badge-open">OPEN</span>`;
+                    else if (isClosed) statusBadge = `<span class="badge badge-closed">CLOSED</span>`;
+                    else if (isOrphan) statusBadge = `<span class="badge badge-rejected" title="${t.remarks || ''}">ORPHAN</span>`;
+                    else statusBadge = `<span class="badge badge-closed">${t.status}</span>`;
+                    
+                    let plText = "—";
+                    let plClass = "";
+                    if (isClosed) {
+                        plText = (pl >= 0 ? "+₹" : "-₹") + Math.abs(pl).toFixed(2);
+                        plClass = pl >= 0 ? "profit" : "loss";
+                    } else if (isOpen) {
+                        plText = "OPEN";
+                        plClass = "profit";
+                    }
+                    
+                    const buyTimeShort = t.buy_time ? t.buy_time.split(" ")[1] : "—";
+                    const buyDateShort = t.buy_time ? t.buy_time.split(" ")[0].substring(5) : "—";
+                    
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>
+                                <div style="font-weight: 600;">${buyTimeShort}</div>
+                                <div style="font-size: 0.75rem; color: var(--text-dim);">${buyDateShort}</div>
+                            </td>
+                            <td>
+                                <div style="font-weight: 700; color: #fff;">${t.symbol} ${parseFloat(t.strike || 0)} ${t.option_type}</div>
+                                <div style="font-size: 0.75rem; color: orange;">📝 Paper Trade | LTP: ${t.ltp_source || 'ticker'}</div>
+                            </td>
+                            <td>
+                                <span class="badge badge-buy">${t.sell_time && !t.buy_time ? 'SELL' : 'BUY'}</span>
                                 <span style="font-weight: 600; margin-left: 0.5rem;">${t.quantity} Qty</span>
                             </td>
                             <td style="font-family: 'Fira Code', monospace; font-weight: 500;">₹${parseFloat(t.buy_price || 0).toFixed(2)}</td>
