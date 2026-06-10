@@ -384,6 +384,15 @@ def _process_order_async(data, config):
         order_type_str = data.get('order_type', 'MARKET').upper()
         side_str = data.get('side', 'BUY').upper()
 
+        # === PREVENT MULTIPLE OPEN POSITIONS ===
+        # If side is BUY, check if any open position exists. If so, ignore the signal.
+        if side_str == 'BUY':
+            open_trades = get_all_trades()
+            has_open_position = any(t.get('status', '').startswith('OPEN') for t in open_trades)
+            if has_open_position:
+                print(f"[BG] ⚠️ Ignoring BUY signal for {symbol} ({option_type}). An open position already exists. Waiting for SELL signal.")
+                return
+
         # === SELL STRIKE AUTO-MATCH ===
         # For SELL orders: If no itm_strike provided, auto-match from trade journal
         # so we sell the EXACT same option we bought (not a new ATM strike)
