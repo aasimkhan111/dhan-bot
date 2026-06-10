@@ -591,7 +591,8 @@ def _process_order_async(data, config):
                     
             if matched_trade:
                 buy_p = float(matched_trade.get('buy_price', 0) or 0)
-                p_l_val = (trade_price - buy_p) * quantity_val
+                matched_qty = int(matched_trade.get('quantity', 0) or 0)
+                p_l_val = (trade_price - buy_p) * matched_qty
                 
                 # If either entry or exit was simulated, the whole trade is closed as simulated
                 entry_was_sim = matched_trade.get('status', '') == "OPEN (Simulated)" or matched_trade.get('buy_order_id') == "SIMULATED"
@@ -675,15 +676,52 @@ def _process_order_async(data, config):
                     break
             
             if matched_paper:
+                # FIX #1: Use the MATCHED trade's quantity for P&L, not the webhook's
+                matched_qty = int(matched_paper.get('quantity', 0) or 0)
+                
+                # FIX #2: If matched paper trade's strike differs from the real order's strike,
+                # re-fetch LTP for the CORRECT strike so exit price is accurate
+                matched_strike = matched_paper.get('strike', '')
+                actual_paper_price = paper_price  # default: use the already-fetched LTP
+                
+                if str(matched_strike) != str(strike) and matched_strike:
+                    print(f"📝 [PAPER] Strike mismatch! Real order: {strike} vs Paper trade: {matched_strike}. Re-fetching LTP for {matched_strike}...")
+                    try:
+                        # Resolve the paper trade's strike to its security ID
+                        paper_sec_id, _, _, _ = get_security_id(
+                            data.get('symbol'), price, option_type, matched_strike
+                        )
+                        if paper_sec_id:
+                            seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
+                            securities = {seg_key: [int(paper_sec_id)]}
+                            quote = dhan_live.ticker_data(securities)
+                            if isinstance(quote, dict) and quote.get('status') == 'success':
+                                outer_data = quote.get('data', {})
+                                inner_data = outer_data.get('data', {})
+                                seg_data = inner_data.get(seg_key, {})
+                                id_data = seg_data.get(str(paper_sec_id), {})
+                                refetched_ltp = float(id_data.get('last_price', 0))
+                                if refetched_ltp > 0:
+                                    actual_paper_price = refetched_ltp
+                                    print(f"📝 [PAPER] ✅ Re-fetched LTP for strike {matched_strike}: ₹{actual_paper_price}")
+                                else:
+                                    print(f"📝 [PAPER] ⚠️ Re-fetch returned 0, using original LTP ₹{paper_price}")
+                            else:
+                                print(f"📝 [PAPER] ⚠️ Ticker API failed, using original LTP ₹{paper_price}")
+                        else:
+                            print(f"📝 [PAPER] ⚠️ Could not resolve sec_id for strike {matched_strike}, using original LTP ₹{paper_price}")
+                    except Exception as refetch_err:
+                        print(f"📝 [PAPER] ⚠️ LTP re-fetch error: {refetch_err}, using original LTP ₹{paper_price}")
+                
                 buy_p = float(matched_paper.get('buy_price', 0) or 0)
-                paper_pl = (paper_price - buy_p) * quantity_val
+                paper_pl = (actual_paper_price - buy_p) * matched_qty
                 matched_paper['sell_time'] = now_str
-                matched_paper['sell_price'] = str(round(paper_price, 2))
+                matched_paper['sell_price'] = str(round(actual_paper_price, 2))
                 matched_paper['p_l'] = str(round(paper_pl, 2))
                 matched_paper['status'] = 'CLOSED'
-                matched_paper['remarks'] = f"Paper exit at LTP ₹{paper_price} | P&L: ₹{round(paper_pl, 2)}"
+                matched_paper['remarks'] = f"Paper exit at LTP ₹{actual_paper_price} | P&L: ₹{round(paper_pl, 2)}"
                 save_all_paper_trades(paper_trades)
-                print(f"📝 [PAPER] Logged SELL: {matched_paper['trade_id']} | Strike: {strike} | LTP: ₹{paper_price} | P&L: ₹{round(paper_pl, 2)}")
+                print(f"📝 [PAPER] Logged SELL: {matched_paper['trade_id']} | Strike: {matched_strike} | LTP: ₹{actual_paper_price} | Qty: {matched_qty} | P&L: ₹{round(paper_pl, 2)}")
             else:
                 paper_id = "P-" + str(uuid.uuid4())[:6]
                 orphan_paper = {
