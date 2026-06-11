@@ -384,13 +384,21 @@ def _process_order_async(data, config):
         order_type_str = data.get('order_type', 'MARKET').upper()
         side_str = data.get('side', 'BUY').upper()
 
-        # === PREVENT MULTIPLE OPEN POSITIONS ===
-        # If side is BUY, check if any open position exists. If so, ignore the signal.
+        # === PREVENT MULTIPLE OPEN POSITIONS AND ORPHAN SELLS ===
+        open_trades = get_all_trades()
+        
+        # 1. If side is BUY, ignore if ANY open position already exists
         if side_str == 'BUY':
-            open_trades = get_all_trades()
             has_open_position = any(t.get('status', '').startswith('OPEN') for t in open_trades)
             if has_open_position:
                 print(f"[BG] ⚠️ Ignoring BUY signal for {symbol} ({option_type}). An open position already exists. Waiting for SELL signal.")
+                return
+                
+        # 2. If side is SELL, ignore if NO open position exists for this option type
+        elif side_str == 'SELL':
+            has_open_position = any(t.get('option_type') == option_type and t.get('status', '').startswith('OPEN') for t in open_trades)
+            if not has_open_position:
+                print(f"[BG] ⚠️ Ignoring SELL signal for {symbol} ({option_type}). No open position exists to close.")
                 return
 
         # === SELL STRIKE AUTO-MATCH ===
