@@ -385,20 +385,27 @@ def _process_order_async(data, config):
         side_str = data.get('side', 'BUY').upper()
 
         # === PREVENT MULTIPLE OPEN POSITIONS AND ORPHAN SELLS ===
-        open_trades = get_all_trades()
+        from datetime import datetime
+        today_str = datetime.now().strftime("%Y-%m-%d")
         
-        # 1. If side is BUY, ignore if ANY open position already exists
+        # Only consider trades opened TODAY to avoid hanging bugs from previous days
+        real_trades = [t for t in get_all_trades() if t.get('buy_time', '').startswith(today_str)]
+        paper_trades = [pt for pt in get_all_paper_trades() if pt.get('buy_time', '').startswith(today_str)]
+        
+        # 1. If side is BUY, ignore if ANY open position already exists (Real OR Paper)
         if side_str == 'BUY':
-            has_open_position = any(t.get('status', '').startswith('OPEN') for t in open_trades)
-            if has_open_position:
-                print(f"[BG] ⚠️ Ignoring BUY signal for {symbol} ({option_type}). An open position already exists. Waiting for SELL signal.")
+            has_open_real = any(t.get('status', '').startswith('OPEN') for t in real_trades)
+            has_open_paper = any(pt.get('status') == 'OPEN' for pt in paper_trades)
+            if has_open_real or has_open_paper:
+                print(f"[BG] ⚠️ Ignoring BUY signal for {symbol} ({option_type}). An open position already exists today. Waiting for SELL signal.")
                 return
                 
         # 2. If side is SELL, ignore if NO open position exists for this option type
         elif side_str == 'SELL':
-            has_open_position = any(t.get('option_type') == option_type and t.get('status', '').startswith('OPEN') for t in open_trades)
-            if not has_open_position:
-                print(f"[BG] ⚠️ Ignoring SELL signal for {symbol} ({option_type}). No open position exists to close.")
+            has_open_real = any(t.get('option_type') == option_type and t.get('status', '').startswith('OPEN') for t in real_trades)
+            has_open_paper = any(pt.get('option_type') == option_type and pt.get('status') == 'OPEN' for pt in paper_trades)
+            if not has_open_real and not has_open_paper:
+                print(f"[BG] ⚠️ Ignoring SELL signal for {symbol} ({option_type}). No open position exists today to close.")
                 return
 
         # === SELL STRIKE AUTO-MATCH ===
