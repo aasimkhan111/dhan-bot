@@ -372,9 +372,13 @@ def save_all_paper_trades(trades):
 
 import threading
 
+# Global lock to prevent race conditions — only ONE webhook signal processes at a time
+_order_lock = threading.Lock()
+
 def _process_order_async(data, config):
     """Background worker: resolves strike, places order, polls status, logs trade.
     Runs in a daemon thread so TradingView gets an instant 200 OK."""
+    _order_lock.acquire()
     try:
         symbol = data.get('symbol')
         price = float(data.get('price', 0))
@@ -772,6 +776,8 @@ def _process_order_async(data, config):
     except Exception as e:
         error_details = traceback.format_exc()
         print(f"[BG] Order Execution Error:\n{error_details}")
+    finally:
+        _order_lock.release()
 
 
 @app.route('/webhook', methods=['POST'])
