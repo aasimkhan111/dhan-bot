@@ -1642,6 +1642,7 @@ def admin_dashboard():
                             <button type="button" class="view-btn" data-view="real" onclick="setView('real')">Real Money</button>
                             <button type="button" class="view-btn active" data-view="simulated" onclick="setView('simulated')">Simulated</button>
                             <button type="button" class="view-btn" data-view="paper" onclick="setView('paper')" style="background: linear-gradient(135deg, rgba(255,165,0,0.15), rgba(255,165,0,0.05)); border-color: rgba(255,165,0,0.3);">📝 Paper Trades</button>
+                            <button type="button" id="paper-today-toggle" class="view-btn active" onclick="togglePaperToday()" style="display: none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.4rem 0.9rem; background: linear-gradient(135deg, rgba(0,200,150,0.2), rgba(0,200,150,0.05)); border-color: rgba(0,200,150,0.4); color: #00c896;">📅 Today Only</button>
                         </div>
                     </div>
 
@@ -1706,6 +1707,7 @@ def admin_dashboard():
             let activeView = "simulated"; // 'real', 'simulated', or 'paper'
             let tradesData = null;
             let paperTradesData = null;
+            let paperTodayOnly = true; // default: show today's trades only
 
             function moveFocus(el, index) {
                 if (el.value.length === 1 && index < 4) {
@@ -1902,14 +1904,38 @@ def admin_dashboard():
 
             function setView(view) {
                 activeView = view;
-                document.querySelectorAll('.view-btn').forEach(btn => {
+                document.querySelectorAll('.view-btn[data-view]').forEach(btn => {
                     if (btn.getAttribute('data-view') === view) {
                         btn.classList.add('active');
                     } else {
                         btn.classList.remove('active');
                     }
                 });
+                // Show/hide the Today Only toggle
+                const todayToggle = document.getElementById('paper-today-toggle');
+                if (todayToggle) {
+                    todayToggle.style.display = (view === 'paper') ? 'inline-block' : 'none';
+                }
                 renderTrades();
+            }
+
+            function togglePaperToday() {
+                paperTodayOnly = !paperTodayOnly;
+                const btn = document.getElementById('paper-today-toggle');
+                if (paperTodayOnly) {
+                    btn.classList.add('active');
+                    btn.style.background = 'linear-gradient(135deg, rgba(0,200,150,0.2), rgba(0,200,150,0.05))';
+                    btn.style.borderColor = 'rgba(0,200,150,0.4)';
+                    btn.style.color = '#00c896';
+                    btn.innerText = '📅 Today Only';
+                } else {
+                    btn.classList.remove('active');
+                    btn.style.background = 'linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))';
+                    btn.style.borderColor = 'rgba(255,255,255,0.15)';
+                    btn.style.color = 'var(--text-dim)';
+                    btn.innerText = '📅 All Trades';
+                }
+                renderPaperTrades();
             }
 
             function renderTrades() {
@@ -2039,7 +2065,35 @@ def admin_dashboard():
             function renderPaperTrades() {
                 if(!paperTradesData) return;
                 
-                const s = paperTradesData.summary;
+                // Get today's date string in YYYY-MM-DD format
+                const now = new Date();
+                const todayDate = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+                
+                // Filter trades if Today Only is active
+                let allTrades = paperTradesData.trades || [];
+                let trades = allTrades;
+                if (paperTodayOnly) {
+                    trades = allTrades.filter(t => {
+                        const bt = t.buy_time || '';
+                        const st = t.sell_time || '';
+                        return bt.startsWith(todayDate) || st.startsWith(todayDate);
+                    });
+                }
+                
+                // Recalculate stats based on filtered trades
+                let todayPl = 0, totalPl = 0, wins = 0, closedCount = 0, openCount = 0;
+                trades.forEach(t => {
+                    const pl = parseFloat(t.p_l || 0);
+                    if (t.status === 'CLOSED') {
+                        closedCount++;
+                        totalPl += pl;
+                        if (pl > 0) wins++;
+                        if (t.sell_time && t.sell_time.startsWith(todayDate)) todayPl += pl;
+                    } else if (t.status === 'OPEN') {
+                        openCount++;
+                    }
+                });
+                const winRate = closedCount > 0 ? (wins / closedCount) * 100 : 0;
                 
                 // Update stats for paper trades
                 const todayPlEl = document.getElementById('stat-today-pl');
@@ -2047,11 +2101,7 @@ def admin_dashboard():
                 const winRateEl = document.getElementById('stat-win-rate');
                 const countEl = document.getElementById('stat-trades-count');
                 
-                const todayPl = s.today_pl || 0;
-                const totalPl = s.total_pl || 0;
-                const winRate = s.win_rate || 0;
-                const closedCount = s.closed_count || 0;
-                const openCount = s.open_count || 0;
+                const labelPrefix = paperTodayOnly ? "Today's " : "";
                 
                 todayPlEl.innerText = (todayPl >= 0 ? "₹" : "-₹") + Math.abs(todayPl).toFixed(2);
                 todayPlEl.className = "stat-value " + (todayPl > 0 ? "profit" : (todayPl < 0 ? "loss" : ""));
@@ -2068,7 +2118,7 @@ def admin_dashboard():
                 // Active paper position
                 const activePosEl = document.getElementById('stat-active-position');
                 const activeCard = document.getElementById('card-active-position');
-                const openPaper = paperTradesData.trades.find(t => t.status === 'OPEN');
+                const openPaper = trades.find(t => t.status === 'OPEN');
                 
                 if (openPaper) {
                     activePosEl.innerText = `${openPaper.option_type} (${parseFloat(openPaper.strike)}) @ ₹${parseFloat(openPaper.buy_price).toFixed(2)}`;
@@ -2084,10 +2134,9 @@ def admin_dashboard():
                 const tbody = document.getElementById('journal-tbody');
                 tbody.innerHTML = "";
                 
-                const trades = paperTradesData.trades;
-                
                 if (!trades || trades.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 3rem;">📝 No paper trades yet. Waiting for TradingView signals...</td></tr>`;
+                    const msg = paperTodayOnly ? '📝 No paper trades today. Waiting for TradingView signals...' : '📝 No paper trades yet. Waiting for TradingView signals...';
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 3rem;">${msg}</td></tr>`;
                     return;
                 }
                 
