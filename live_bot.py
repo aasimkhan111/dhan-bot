@@ -1397,29 +1397,172 @@ def admin_dashboard():
 
             .view-selector {
                 display: flex;
-                background: rgba(0, 0, 0, 0.4);
-                padding: 0.3rem;
-                border-radius: 12px;
-                border: 1px solid rgba(255, 255, 255, 0.05);
+                align-items: center;
+                gap: 0.5rem;
+                flex-wrap: wrap;
+            }
+
+            .view-tabs {
+                display: flex;
+                background: rgba(0, 0, 0, 0.5);
+                padding: 4px;
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                backdrop-filter: blur(20px);
+                position: relative;
+                overflow: hidden;
+            }
+
+            .view-tabs::before {
+                content: '';
+                position: absolute;
+                inset: 0;
+                border-radius: 16px;
+                padding: 1px;
+                background: linear-gradient(135deg, rgba(121,40,202,0.2), rgba(0,223,216,0.1), rgba(255,0,122,0.1));
+                -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+                -webkit-mask-composite: xor;
+                mask-composite: exclude;
+                pointer-events: none;
             }
 
             .view-btn {
                 background: transparent;
                 border: none;
-                padding: 0.5rem 1.2rem;
-                border-radius: 9px;
-                font-size: 0.8rem;
-                font-weight: 600;
+                padding: 0.55rem 1.3rem;
+                border-radius: 12px;
+                font-size: 0.78rem;
+                font-weight: 700;
+                letter-spacing: 0.02em;
                 color: var(--text-dim);
                 cursor: pointer;
-                transition: all 0.3s;
+                transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
                 flex: none;
+                display: flex;
+                align-items: center;
+                gap: 0.45rem;
+                position: relative;
+                z-index: 1;
             }
 
-            .view-btn.active {
-                background: var(--primary);
+            .view-btn:hover:not(.active) {
+                color: #e2e8f0;
+                background: rgba(255,255,255,0.06);
+                transform: translateY(-1px);
+            }
+
+            .view-btn .tab-icon {
+                font-size: 1rem;
+                line-height: 1;
+                transition: transform 0.3s ease;
+            }
+
+            .view-btn:hover .tab-icon {
+                transform: scale(1.15);
+            }
+
+            .view-btn.active .tab-icon {
+                animation: iconPop 0.4s ease;
+            }
+
+            @keyframes iconPop {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.3); }
+                100% { transform: scale(1); }
+            }
+
+            /* Real Money Active */
+            .view-btn[data-view='real'].active {
+                background: linear-gradient(135deg, #10b981, #059669);
                 color: #fff;
-                box-shadow: 0 4px 12px rgba(121, 40, 202, 0.4);
+                box-shadow: 0 4px 20px rgba(16,185,129,0.35), 0 0 40px rgba(16,185,129,0.08);
+            }
+
+            /* Simulated Active */
+            .view-btn[data-view='simulated'].active {
+                background: linear-gradient(135deg, #7928CA, #9333ea);
+                color: #fff;
+                box-shadow: 0 4px 20px rgba(121,40,202,0.4), 0 0 40px rgba(121,40,202,0.1);
+            }
+
+            /* Paper Trades Active */
+            .view-btn[data-view='paper'].active {
+                background: linear-gradient(135deg, #f59e0b, #d97706);
+                color: #fff;
+                box-shadow: 0 4px 20px rgba(245,158,11,0.35), 0 0 40px rgba(245,158,11,0.08);
+            }
+
+            /* Today/All toggle switch */
+            .today-toggle-wrap {
+                display: none;
+                align-items: center;
+                gap: 0.6rem;
+                margin-left: 0.5rem;
+                padding: 4px 14px 4px 10px;
+                background: rgba(0,0,0,0.5);
+                border-radius: 50px;
+                border: 1px solid rgba(255,255,255,0.06);
+                backdrop-filter: blur(20px);
+                animation: slideInRight 0.3s ease;
+            }
+
+            @keyframes slideInRight {
+                from { opacity: 0; transform: translateX(-10px); }
+                to { opacity: 1; transform: translateX(0); }
+            }
+
+            .today-toggle-wrap.visible {
+                display: flex;
+            }
+
+            .today-toggle-label {
+                font-size: 0.72rem;
+                font-weight: 700;
+                letter-spacing: 0.03em;
+                color: var(--text-dim);
+                transition: color 0.3s;
+                cursor: pointer;
+                user-select: none;
+            }
+
+            .today-toggle-label.active-label {
+                color: #00DFD8;
+                text-shadow: 0 0 8px rgba(0,223,216,0.3);
+            }
+
+            .toggle-track {
+                width: 44px;
+                height: 24px;
+                background: rgba(255,255,255,0.08);
+                border-radius: 50px;
+                position: relative;
+                cursor: pointer;
+                transition: background 0.3s ease;
+                border: 1px solid rgba(255,255,255,0.1);
+                flex-shrink: 0;
+            }
+
+            .toggle-track.active {
+                background: linear-gradient(135deg, #00DFD8, #00b4d8);
+                border-color: rgba(0,223,216,0.4);
+                box-shadow: 0 0 16px rgba(0,223,216,0.25);
+            }
+
+            .toggle-thumb {
+                width: 18px;
+                height: 18px;
+                background: #fff;
+                border-radius: 50%;
+                position: absolute;
+                top: 2px;
+                left: 2px;
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            }
+
+            .toggle-track.active .toggle-thumb {
+                transform: translateX(20px);
+                box-shadow: 0 2px 8px rgba(0,223,216,0.4);
             }
 
             .stats-grid {
@@ -1639,10 +1782,24 @@ def admin_dashboard():
                             Quant Ledger & P&L Stream
                         </div>
                         <div class="view-selector">
-                            <button type="button" class="view-btn" data-view="real" onclick="setView('real')">Real Money</button>
-                            <button type="button" class="view-btn active" data-view="simulated" onclick="setView('simulated')">Simulated</button>
-                            <button type="button" class="view-btn" data-view="paper" onclick="setView('paper')" style="background: linear-gradient(135deg, rgba(255,165,0,0.15), rgba(255,165,0,0.05)); border-color: rgba(255,165,0,0.3);">📝 Paper Trades</button>
-                            <button type="button" id="paper-today-toggle" class="view-btn active" onclick="togglePaperToday()" style="display: none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.4rem 0.9rem; background: linear-gradient(135deg, rgba(0,200,150,0.2), rgba(0,200,150,0.05)); border-color: rgba(0,200,150,0.4); color: #00c896;">📅 Today Only</button>
+                            <div class="view-tabs">
+                                <button type="button" class="view-btn" data-view="real" onclick="setView('real')">
+                                    <span class="tab-icon">💰</span> Real Money
+                                </button>
+                                <button type="button" class="view-btn active" data-view="simulated" onclick="setView('simulated')">
+                                    <span class="tab-icon">⚡</span> Simulated
+                                </button>
+                                <button type="button" class="view-btn" data-view="paper" onclick="setView('paper')">
+                                    <span class="tab-icon">📝</span> Paper Trades
+                                </button>
+                            </div>
+                            <div class="today-toggle-wrap" id="today-toggle-wrap">
+                                <span class="today-toggle-label" id="toggle-label-all">ALL</span>
+                                <div class="toggle-track active" id="today-toggle-track" onclick="togglePaperToday()">
+                                    <div class="toggle-thumb"></div>
+                                </div>
+                                <span class="today-toggle-label active-label" id="toggle-label-today">TODAY</span>
+                            </div>
                         </div>
                     </div>
 
@@ -1912,28 +2069,30 @@ def admin_dashboard():
                     }
                 });
                 // Show/hide the Today Only toggle
-                const todayToggle = document.getElementById('paper-today-toggle');
-                if (todayToggle) {
-                    todayToggle.style.display = (view === 'paper') ? 'inline-block' : 'none';
+                const toggleWrap = document.getElementById('today-toggle-wrap');
+                if (toggleWrap) {
+                    if (view === 'paper') {
+                        toggleWrap.classList.add('visible');
+                    } else {
+                        toggleWrap.classList.remove('visible');
+                    }
                 }
                 renderTrades();
             }
 
             function togglePaperToday() {
                 paperTodayOnly = !paperTodayOnly;
-                const btn = document.getElementById('paper-today-toggle');
+                const track = document.getElementById('today-toggle-track');
+                const labelAll = document.getElementById('toggle-label-all');
+                const labelToday = document.getElementById('toggle-label-today');
                 if (paperTodayOnly) {
-                    btn.classList.add('active');
-                    btn.style.background = 'linear-gradient(135deg, rgba(0,200,150,0.2), rgba(0,200,150,0.05))';
-                    btn.style.borderColor = 'rgba(0,200,150,0.4)';
-                    btn.style.color = '#00c896';
-                    btn.innerText = '📅 Today Only';
+                    track.classList.add('active');
+                    labelToday.classList.add('active-label');
+                    labelAll.classList.remove('active-label');
                 } else {
-                    btn.classList.remove('active');
-                    btn.style.background = 'linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))';
-                    btn.style.borderColor = 'rgba(255,255,255,0.15)';
-                    btn.style.color = 'var(--text-dim)';
-                    btn.innerText = '📅 All Trades';
+                    track.classList.remove('active');
+                    labelAll.classList.add('active-label');
+                    labelToday.classList.remove('active-label');
                 }
                 renderPaperTrades();
             }
