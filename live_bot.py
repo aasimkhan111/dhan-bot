@@ -1904,11 +1904,11 @@ def admin_dashboard():
                                 </button>
                             </div>
                             <div class="today-toggle-wrap visible" id="today-toggle-wrap">
-                                <span class="today-toggle-label active-label" id="toggle-label-all">ALL</span>
-                                <div class="toggle-track" id="today-toggle-track" onclick="togglePaperToday()">
+                                <span class="today-toggle-label" id="toggle-label-all">ALL</span>
+                                <div class="toggle-track active" id="today-toggle-track" onclick="togglePaperToday()">
                                     <div class="toggle-thumb"></div>
                                 </div>
-                                <span class="today-toggle-label" id="toggle-label-today">TODAY</span>
+                                <span class="today-toggle-label active-label" id="toggle-label-today">TODAY</span>
                             </div>
                         </div>
                     </div>
@@ -1995,7 +1995,7 @@ def admin_dashboard():
             let activeView = "paper"; // 'real', 'simulated', or 'paper'
             let tradesData = null;
             let paperTradesData = null;
-            let paperTodayOnly = false; // default: show all trades
+            let paperTodayOnly = true; // default: show today's trades only
 
             function moveFocus(el, index) {
                 if (el.value.length === 1 && index < 4) {
