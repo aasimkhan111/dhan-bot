@@ -1682,7 +1682,100 @@ def admin_dashboard():
             .badge-rejected { background: rgba(239, 68, 68, 0.05); color: #64748b; border: 1px solid rgba(255, 255, 255, 0.05); cursor: help; }
 
             .profit { color: var(--success) !important; }
-            .loss { color: var(--error) !important; }
+            /* --- CALENDAR STYLES --- */
+            #calendar-wrapper {
+                display: none;
+                margin-bottom: 2rem;
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 16px;
+                padding: 1.5rem;
+                backdrop-filter: blur(10px);
+                animation: fadeIn 0.4s ease;
+            }
+            .calendar-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1.5rem;
+            }
+            .calendar-title {
+                font-family: 'Outfit', sans-serif;
+                font-size: 1.2rem;
+                font-weight: 700;
+                color: #fff;
+            }
+            .calendar-nav-btn {
+                background: transparent;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                color: var(--secondary);
+                width: 32px;
+                height: 32px;
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                transition: all 0.3s ease;
+            }
+            .calendar-nav-btn:hover {
+                background: rgba(0, 223, 216, 0.1);
+                border-color: rgba(0, 223, 216, 0.3);
+            }
+            .calendar-grid {
+                display: grid;
+                grid-template-columns: repeat(7, 1fr);
+                gap: 8px;
+            }
+            .calendar-day-header {
+                text-align: center;
+                font-size: 0.75rem;
+                font-weight: 700;
+                color: var(--text-dim);
+                padding-bottom: 0.5rem;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                margin-bottom: 0.5rem;
+            }
+            .calendar-cell {
+                aspect-ratio: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                border-radius: 12px;
+                font-size: 0.9rem;
+                font-weight: 600;
+                color: #e2e8f0;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                border: 1px solid transparent;
+                position: relative;
+            }
+            .calendar-cell:hover:not(.empty) {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: rgba(255, 255, 255, 0.1);
+            }
+            .calendar-cell.active-date {
+                background: linear-gradient(135deg, rgba(121, 40, 202, 0.2), rgba(0, 223, 216, 0.2));
+                border-color: var(--secondary);
+                color: #fff;
+                box-shadow: 0 0 15px rgba(0, 223, 216, 0.15);
+            }
+            .calendar-cell.empty {
+                cursor: default;
+            }
+            .calendar-cell .dot {
+                width: 4px;
+                height: 4px;
+                border-radius: 50%;
+                background: var(--success);
+                position: absolute;
+                bottom: 8px;
+                display: none;
+            }
+            .calendar-cell.has-trades .dot {
+                display: block;
+            }
         </style>
     </head>
     <body>
@@ -1821,6 +1914,27 @@ def admin_dashboard():
                         <div class="stat-card stat-neutral" id="card-active-position">
                             <span class="stat-label">Active Position</span>
                             <span class="stat-value" id="stat-active-position" style="font-size: 1.25rem; font-family: sans-serif; font-weight: 600; letter-spacing: normal; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">NONE</span>
+                        </div>
+                    </div>
+
+                    <!-- Calendar Wrapper (Initially Hidden) -->
+                    <div id="calendar-wrapper">
+                        <div class="calendar-header">
+                            <button type="button" class="calendar-nav-btn" onclick="changeMonth(-1)">&#9664;</button>
+                            <div class="calendar-title" id="calendar-title">June 2026</div>
+                            <button type="button" class="calendar-nav-btn" onclick="changeMonth(1)">&#9654;</button>
+                        </div>
+                        <div class="calendar-grid">
+                            <div class="calendar-day-header">Mon</div>
+                            <div class="calendar-day-header">Tue</div>
+                            <div class="calendar-day-header">Wed</div>
+                            <div class="calendar-day-header">Thu</div>
+                            <div class="calendar-day-header">Fri</div>
+                            <div class="calendar-day-header">Sat</div>
+                            <div class="calendar-day-header">Sun</div>
+                        </div>
+                        <div class="calendar-grid" id="calendar-days">
+                            <!-- Days populated by JS -->
                         </div>
                     </div>
 
@@ -2070,14 +2184,80 @@ def admin_dashboard():
                 });
                 // Show/hide the Today Only toggle
                 const toggleWrap = document.getElementById('today-toggle-wrap');
+                const calWrapper = document.getElementById('calendar-wrapper');
                 if (toggleWrap) {
                     if (view === 'paper') {
                         toggleWrap.classList.add('visible');
+                        if (!paperTodayOnly) calWrapper.style.display = 'block';
                     } else {
                         toggleWrap.classList.remove('visible');
+                        if (calWrapper) calWrapper.style.display = 'none';
                     }
                 }
                 renderTrades();
+            }
+
+            // --- CALENDAR LOGIC ---
+            let currentCalendarDate = new Date();
+            let selectedCalendarDate = null; // YYYY-MM-DD
+
+            function changeMonth(offset) {
+                currentCalendarDate.setMonth(currentCalendarDate.getMonth() + offset);
+                renderCalendar();
+            }
+
+            function selectDate(dateString) {
+                if (selectedCalendarDate === dateString) {
+                    selectedCalendarDate = null; // Toggle off
+                } else {
+                    selectedCalendarDate = dateString;
+                }
+                renderCalendar();
+                renderPaperTrades();
+            }
+
+            function renderCalendar() {
+                const year = currentCalendarDate.getFullYear();
+                const month = currentCalendarDate.getMonth();
+                const firstDay = new Date(year, month, 1);
+                const lastDay = new Date(year, month + 1, 0);
+                
+                const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                document.getElementById('calendar-title').innerText = `${monthNames[month]} ${year}`;
+                
+                let dayOfWeek = firstDay.getDay() - 1; // 0=Sun, 1=Mon. Adjusting to Mon=0
+                if (dayOfWeek === -1) dayOfWeek = 6;
+                
+                const daysGrid = document.getElementById('calendar-days');
+                if (!daysGrid) return;
+                daysGrid.innerHTML = '';
+                
+                // Track dates with trades
+                const datesWithTrades = new Set();
+                if (paperTradesData && paperTradesData.trades) {
+                    paperTradesData.trades.forEach(t => {
+                        if (t.buy_time) datesWithTrades.add(t.buy_time.split(" ")[0]);
+                        if (t.sell_time) datesWithTrades.add(t.sell_time.split(" ")[0]);
+                    });
+                }
+                
+                for (let i = 0; i < dayOfWeek; i++) {
+                    daysGrid.innerHTML += `<div class="calendar-cell empty"></div>`;
+                }
+                
+                for (let day = 1; day <= lastDay.getDate(); day++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    let classes = 'calendar-cell';
+                    if (selectedCalendarDate === dateStr) classes += ' active-date';
+                    if (datesWithTrades.has(dateStr)) classes += ' has-trades';
+                    
+                    daysGrid.innerHTML += `
+                        <div class="${classes}" onclick="selectDate('${dateStr}')">
+                            ${day}
+                            <div class="dot"></div>
+                        </div>
+                    `;
+                }
             }
 
             function togglePaperToday() {
@@ -2085,14 +2265,20 @@ def admin_dashboard():
                 const track = document.getElementById('today-toggle-track');
                 const labelAll = document.getElementById('toggle-label-all');
                 const labelToday = document.getElementById('toggle-label-today');
+                const calWrapper = document.getElementById('calendar-wrapper');
+
                 if (paperTodayOnly) {
                     track.classList.add('active');
                     labelToday.classList.add('active-label');
                     labelAll.classList.remove('active-label');
+                    if (calWrapper) calWrapper.style.display = 'none';
+                    selectedCalendarDate = null;
                 } else {
                     track.classList.remove('active');
                     labelAll.classList.add('active-label');
                     labelToday.classList.remove('active-label');
+                    if (calWrapper) calWrapper.style.display = 'block';
+                    renderCalendar();
                 }
                 renderPaperTrades();
             }
@@ -2230,13 +2416,23 @@ def admin_dashboard():
                 
                 // Filter trades if Today Only is active
                 let allTrades = paperTradesData.trades || [];
-                let trades = allTrades;
+                let trades = [];
                 if (paperTodayOnly) {
                     trades = allTrades.filter(t => {
                         const bt = t.buy_time || '';
                         const st = t.sell_time || '';
                         return bt.startsWith(todayDate) || st.startsWith(todayDate);
                     });
+                } else {
+                    if (selectedCalendarDate) {
+                        trades = allTrades.filter(t => {
+                            const bt = t.buy_time || '';
+                            const st = t.sell_time || '';
+                            return bt.startsWith(selectedCalendarDate) || st.startsWith(selectedCalendarDate);
+                        });
+                    } else {
+                        trades = [];
+                    }
                 }
                 
                 // Recalculate stats based on filtered trades
@@ -2294,7 +2490,14 @@ def admin_dashboard():
                 tbody.innerHTML = "";
                 
                 if (!trades || trades.length === 0) {
-                    const msg = paperTodayOnly ? '📝 No paper trades today. Waiting for TradingView signals...' : '📝 No paper trades yet. Waiting for TradingView signals...';
+                    let msg = '';
+                    if (paperTodayOnly) {
+                        msg = '📝 No paper trades today. Waiting for TradingView signals...';
+                    } else if (!selectedCalendarDate) {
+                        msg = '🗓️ Please select a date from the calendar to view trades.';
+                    } else {
+                        msg = '🗓️ No paper trades found on the selected date.';
+                    }
                     tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 3rem;">${msg}</td></tr>`;
                     return;
                 }
