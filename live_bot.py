@@ -2240,12 +2240,19 @@ def admin_dashboard():
                 if (!daysGrid) return;
                 daysGrid.innerHTML = '';
                 
-                // Track dates with trades
-                const datesWithTrades = new Set();
+                // Track daily P&L
+                const dailyPL = new Map();
                 if (paperTradesData && paperTradesData.trades) {
                     paperTradesData.trades.forEach(t => {
-                        if (t.buy_time) datesWithTrades.add(t.buy_time.split(" ")[0]);
-                        if (t.sell_time) datesWithTrades.add(t.sell_time.split(" ")[0]);
+                        const pl = parseFloat(t.p_l || 0);
+                        if (t.status === 'CLOSED' && t.sell_time) {
+                            const dateStr = t.sell_time.split(" ")[0];
+                            dailyPL.set(dateStr, (dailyPL.get(dateStr) || 0) + pl);
+                        }
+                        if (t.buy_time) {
+                            const dateStr = t.buy_time.split(" ")[0];
+                            if (!dailyPL.has(dateStr)) dailyPL.set(dateStr, 0);
+                        }
                     });
                 }
                 
@@ -2257,12 +2264,25 @@ def admin_dashboard():
                     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                     let classes = 'calendar-cell';
                     if (selectedCalendarDate === dateStr) classes += ' active-date';
-                    if (datesWithTrades.has(dateStr)) classes += ' has-trades';
+                    
+                    let dotColor = '';
+                    if (dailyPL.has(dateStr)) {
+                        classes += ' has-trades';
+                        const pl = dailyPL.get(dateStr);
+                        if (pl > 0) dotColor = 'var(--success)';
+                        else if (pl < 0) dotColor = 'var(--error)';
+                        else dotColor = 'var(--secondary)'; // exactly 0 or no closed trades yet
+                    }
+                    
+                    let dotHtml = `<div class="dot"></div>`;
+                    if (dotColor) {
+                        dotHtml = `<div class="dot" style="background: ${dotColor}; box-shadow: 0 0 5px ${dotColor};"></div>`;
+                    }
                     
                     daysGrid.innerHTML += `
                         <div class="${classes}" onclick="selectDate('${dateStr}')">
                             ${day}
-                            <div class="dot"></div>
+                            ${dotHtml}
                         </div>
                     `;
                 }
