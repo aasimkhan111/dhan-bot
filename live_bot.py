@@ -1682,32 +1682,40 @@ def admin_dashboard():
             .badge-rejected { background: rgba(239, 68, 68, 0.05); color: #64748b; border: 1px solid rgba(255, 255, 255, 0.05); cursor: help; }
 
             .profit { color: var(--success) !important; }
+            .loss { color: var(--error) !important; }
+
             /* --- CALENDAR STYLES --- */
             #calendar-wrapper {
                 display: none;
-                margin-bottom: 2rem;
-                background: rgba(255, 255, 255, 0.02);
-                border: 1px solid rgba(255, 255, 255, 0.05);
+                margin: 0 auto 2rem auto;
+                max-width: 450px;
+                background: rgba(13, 17, 28, 0.95);
+                border: 1px solid rgba(0, 223, 216, 0.15);
                 border-radius: 16px;
                 padding: 1.5rem;
-                backdrop-filter: blur(10px);
+                backdrop-filter: blur(20px);
                 animation: fadeIn 0.4s ease;
+                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
             }
             .calendar-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
                 margin-bottom: 1.5rem;
+                background: rgba(255, 255, 255, 0.02);
+                padding: 0.5rem 1rem;
+                border-radius: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.05);
             }
             .calendar-title {
                 font-family: 'Outfit', sans-serif;
-                font-size: 1.2rem;
-                font-weight: 700;
+                font-size: 1rem;
+                font-weight: 800;
                 color: #fff;
             }
             .calendar-nav-btn {
                 background: transparent;
-                border: 1px solid rgba(255, 255, 255, 0.1);
+                border: none;
                 color: var(--secondary);
                 width: 32px;
                 height: 32px;
@@ -1720,16 +1728,15 @@ def admin_dashboard():
             }
             .calendar-nav-btn:hover {
                 background: rgba(0, 223, 216, 0.1);
-                border-color: rgba(0, 223, 216, 0.3);
             }
             .calendar-grid {
                 display: grid;
                 grid-template-columns: repeat(7, 1fr);
-                gap: 8px;
+                gap: 4px;
             }
             .calendar-day-header {
                 text-align: center;
-                font-size: 0.75rem;
+                font-size: 0.7rem;
                 font-weight: 700;
                 color: var(--text-dim);
                 padding-bottom: 0.5rem;
@@ -1737,29 +1744,29 @@ def admin_dashboard():
                 margin-bottom: 0.5rem;
             }
             .calendar-cell {
-                aspect-ratio: 1;
+                height: 44px;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
-                border-radius: 12px;
-                font-size: 0.9rem;
-                font-weight: 600;
+                border-radius: 8px;
+                font-size: 0.85rem;
+                font-weight: 700;
                 color: #e2e8f0;
                 cursor: pointer;
                 transition: all 0.2s ease;
                 border: 1px solid transparent;
                 position: relative;
+                background: transparent;
             }
             .calendar-cell:hover:not(.empty) {
                 background: rgba(255, 255, 255, 0.05);
-                border-color: rgba(255, 255, 255, 0.1);
             }
             .calendar-cell.active-date {
-                background: linear-gradient(135deg, rgba(121, 40, 202, 0.2), rgba(0, 223, 216, 0.2));
+                background: linear-gradient(135deg, rgba(121, 40, 202, 0.3), rgba(0, 223, 216, 0.3));
                 border-color: var(--secondary);
                 color: #fff;
-                box-shadow: 0 0 15px rgba(0, 223, 216, 0.15);
+                box-shadow: 0 0 10px rgba(0, 223, 216, 0.2);
             }
             .calendar-cell.empty {
                 cursor: default;
@@ -1768,10 +1775,11 @@ def admin_dashboard():
                 width: 4px;
                 height: 4px;
                 border-radius: 50%;
-                background: var(--success);
+                background: var(--secondary);
                 position: absolute;
-                bottom: 8px;
+                bottom: 4px;
                 display: none;
+                box-shadow: 0 0 5px var(--secondary);
             }
             .calendar-cell.has-trades .dot {
                 display: block;
