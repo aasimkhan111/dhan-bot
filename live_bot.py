@@ -1763,26 +1763,35 @@ def admin_dashboard():
                 background: rgba(255, 255, 255, 0.05);
             }
             .calendar-cell.active-date {
-                background: linear-gradient(135deg, rgba(121, 40, 202, 0.3), rgba(0, 223, 216, 0.3));
+                background: rgba(255, 255, 255, 0.1);
                 border-color: var(--secondary);
                 color: #fff;
                 box-shadow: 0 0 10px rgba(0, 223, 216, 0.2);
             }
+            .calendar-cell.profit-day {
+                background: rgba(16, 185, 129, 0.15);
+                border-color: rgba(16, 185, 129, 0.3);
+                color: #10b981;
+            }
+            .calendar-cell.loss-day {
+                background: rgba(239, 68, 68, 0.15);
+                border-color: rgba(239, 68, 68, 0.3);
+                color: #ef4444;
+            }
+            .calendar-cell.profit-day.active-date {
+                background: rgba(16, 185, 129, 0.4);
+                border-color: #10b981;
+                color: #fff;
+                box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+            }
+            .calendar-cell.loss-day.active-date {
+                background: rgba(239, 68, 68, 0.4);
+                border-color: #ef4444;
+                color: #fff;
+                box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+            }
             .calendar-cell.empty {
                 cursor: default;
-            }
-            .calendar-cell .dot {
-                width: 4px;
-                height: 4px;
-                border-radius: 50%;
-                background: var(--secondary);
-                position: absolute;
-                bottom: 4px;
-                display: none;
-                box-shadow: 0 0 5px var(--secondary);
-            }
-            .calendar-cell.has-trades .dot {
-                display: block;
             }
         </style>
     </head>
@@ -1887,19 +1896,19 @@ def admin_dashboard():
                                 <button type="button" class="view-btn" data-view="real" onclick="setView('real')">
                                     <span class="tab-icon">💰</span> Real Money
                                 </button>
-                                <button type="button" class="view-btn active" data-view="simulated" onclick="setView('simulated')">
+                                <button type="button" class="view-btn" data-view="simulated" onclick="setView('simulated')">
                                     <span class="tab-icon">⚡</span> Simulated
                                 </button>
-                                <button type="button" class="view-btn" data-view="paper" onclick="setView('paper')">
+                                <button type="button" class="view-btn active" data-view="paper" onclick="setView('paper')">
                                     <span class="tab-icon">📝</span> Paper Trades
                                 </button>
                             </div>
-                            <div class="today-toggle-wrap" id="today-toggle-wrap">
-                                <span class="today-toggle-label" id="toggle-label-all">ALL</span>
-                                <div class="toggle-track active" id="today-toggle-track" onclick="togglePaperToday()">
+                            <div class="today-toggle-wrap visible" id="today-toggle-wrap">
+                                <span class="today-toggle-label active-label" id="toggle-label-all">ALL</span>
+                                <div class="toggle-track" id="today-toggle-track" onclick="togglePaperToday()">
                                     <div class="toggle-thumb"></div>
                                 </div>
-                                <span class="today-toggle-label active-label" id="toggle-label-today">TODAY</span>
+                                <span class="today-toggle-label" id="toggle-label-today">TODAY</span>
                             </div>
                         </div>
                     </div>
@@ -1983,10 +1992,10 @@ def admin_dashboard():
 
         <script>
             let adminPin = "";
-            let activeView = "simulated"; // 'real', 'simulated', or 'paper'
+            let activeView = "paper"; // 'real', 'simulated', or 'paper'
             let tradesData = null;
             let paperTradesData = null;
-            let paperTodayOnly = true; // default: show today's trades only
+            let paperTodayOnly = false; // default: show all trades
 
             function moveFocus(el, index) {
                 if (el.value.length === 1 && index < 4) {
@@ -2265,24 +2274,16 @@ def admin_dashboard():
                     let classes = 'calendar-cell';
                     if (selectedCalendarDate === dateStr) classes += ' active-date';
                     
-                    let dotColor = '';
                     if (dailyPL.has(dateStr)) {
-                        classes += ' has-trades';
                         const pl = dailyPL.get(dateStr);
-                        if (pl > 0) dotColor = 'var(--success)';
-                        else if (pl < 0) dotColor = 'var(--error)';
-                        else dotColor = 'var(--secondary)'; // exactly 0 or no closed trades yet
-                    }
-                    
-                    let dotHtml = `<div class="dot"></div>`;
-                    if (dotColor) {
-                        dotHtml = `<div class="dot" style="background: ${dotColor}; box-shadow: 0 0 5px ${dotColor};"></div>`;
+                        if (pl > 0) classes += ' profit-day';
+                        else if (pl < 0) classes += ' loss-day';
+                        else classes += ' neutral-day';
                     }
                     
                     daysGrid.innerHTML += `
                         <div class="${classes}" onclick="selectDate('${dateStr}')">
                             ${day}
-                            ${dotHtml}
                         </div>
                     `;
                 }
