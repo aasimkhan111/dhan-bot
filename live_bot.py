@@ -178,10 +178,10 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
                     return None, None, None, None
                 # Calculate Strike (Step of 100 for BankNifty, 50 for Nifty)
                 step = 100 if "BANKNIFTY" in base else 50
-                strike = round(price / step) * step
                 
-                # Apply ITM Offset (100 points for BankNifty, 50 for Nifty)
+                # Apply ITM Offset (100 points per level for BankNifty, 50 for Nifty)
                 if "-ITM" in symbol:
+                    import math
                     multiplier = 1
                     try:
                         suffix = symbol.split("-ITM")[1]
@@ -189,9 +189,16 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
                             multiplier = int(suffix)
                     except:
                         pass
-                        
-                    if option_type == 'CE': strike -= (step * multiplier)
-                    else: strike += (step * multiplier)
+                    
+                    # CE: round DOWN then go deeper ITM (lower strike)
+                    # PE: round UP then go deeper ITM (higher strike)
+                    if option_type == 'CE':
+                        strike = math.floor(price / step) * step - (step * multiplier)
+                    else:
+                        strike = math.ceil(price / step) * step + (step * multiplier)
+                else:
+                    # ATM: round to nearest
+                    strike = round(price / step) * step
 
             print(f"[ATM/ITM] Using {symbol} logic for {base}: Strike {strike}")
             
@@ -671,135 +678,105 @@ def _process_order_async(data, config):
 
         # === PAPER TRADING JOURNAL (runs ALWAYS for comparison) ===
         paper_trades = get_all_paper_trades()
+        paper_price = option_ltp if option_ltp > 0 else trade_price
+        ltp_source = "ticker_data" if option_ltp > 0 else "fallback"
         
-        # Paper trade MUST use the real option LTP, NEVER the index price.
-        # If option_ltp is 0, retry fetching it up to 3 times before skipping.
-        paper_price = option_ltp
-        ltp_source = "ticker_data"
-        
-        if paper_price <= 0:
-            print(f"📝 [PAPER] option_ltp is 0. Retrying LTP fetch for sec_id {sec_id}...")
-            import time
-            for attempt in range(1, 4):
-                try:
-                    time.sleep(1)  # Wait 1 second between retries
-                    seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
-                    securities = {seg_key: [int(sec_id)]}
-                    quote = dhan_live.ticker_data(securities)
-                    if isinstance(quote, dict) and quote.get('status') == 'success':
-                        outer_data = quote.get('data', {})
-                        inner_data = outer_data.get('data', {})
-                        seg_data = inner_data.get(seg_key, {})
-                        id_data = seg_data.get(str(sec_id), {})
-                        retried_ltp = float(id_data.get('last_price', 0))
-                        if retried_ltp > 0:
-                            paper_price = retried_ltp
-                            ltp_source = f"ticker_data_retry_{attempt}"
-                            print(f"📝 [PAPER] ✅ Retry {attempt} succeeded: LTP ₹{paper_price}")
-                            break
-                    print(f"📝 [PAPER] ⚠️ Retry {attempt}/3 failed, response: {quote}")
-                except Exception as retry_err:
-                    print(f"📝 [PAPER] ⚠️ Retry {attempt}/3 error: {retry_err}")
-        
-        if paper_price <= 0:
-            print(f"📝 [PAPER] ❌ Could not fetch option LTP after 3 retries. SKIPPING paper trade to avoid logging index price as option price.")
-        else:
-            if side_str == 'BUY':
+        if side_str == 'BUY':
+            paper_id = "P-" + str(uuid.uuid4())[:6]
+            paper_trade = {
+                "trade_id": paper_id,
+                "symbol": str(base_symbol),
+                "option_type": str(option_type),
+                "strike": str(strike),
+                "quantity": str(quantity_val),
+                "buy_time": now_str,
+                "buy_price": str(round(paper_price, 2)),
+                "sell_time": "",
+                "sell_price": "",
+                "p_l": "0.0",
+                "status": "OPEN",
+                "ltp_source": ltp_source,
+                "remarks": f"Paper entry at LTP ₹{paper_price}"
+            }
+            paper_trades.append(paper_trade)
+            save_all_paper_trades(paper_trades)
+            print(f"📝 [PAPER] Logged BUY: {paper_id} | Strike: {strike} | LTP: ₹{paper_price}")
+            
+        elif side_str == 'SELL':
+            # Match with latest open paper trade of same option type
+            matched_paper = None
+            for pt in reversed(paper_trades):
+                if pt.get('option_type') == option_type and pt.get('status') == 'OPEN':
+                    matched_paper = pt
+                    break
+            
+            if matched_paper:
+                # FIX #1: Use the MATCHED trade's quantity for P&L, not the webhook's
+                matched_qty = int(matched_paper.get('quantity', 0) or 0)
+                
+                # FIX #2: If matched paper trade's strike differs from the real order's strike,
+                # re-fetch LTP for the CORRECT strike so exit price is accurate
+                matched_strike = matched_paper.get('strike', '')
+                actual_paper_price = paper_price  # default: use the already-fetched LTP
+                
+                if str(matched_strike) != str(strike) and matched_strike:
+                    print(f"📝 [PAPER] Strike mismatch! Real order: {strike} vs Paper trade: {matched_strike}. Re-fetching LTP for {matched_strike}...")
+                    try:
+                        # Resolve the paper trade's strike to its security ID
+                        paper_sec_id, _, _, _ = get_security_id(
+                            data.get('symbol'), price, option_type, matched_strike
+                        )
+                        if paper_sec_id:
+                            seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
+                            securities = {seg_key: [int(paper_sec_id)]}
+                            quote = dhan_live.ticker_data(securities)
+                            if isinstance(quote, dict) and quote.get('status') == 'success':
+                                outer_data = quote.get('data', {})
+                                inner_data = outer_data.get('data', {})
+                                seg_data = inner_data.get(seg_key, {})
+                                id_data = seg_data.get(str(paper_sec_id), {})
+                                refetched_ltp = float(id_data.get('last_price', 0))
+                                if refetched_ltp > 0:
+                                    actual_paper_price = refetched_ltp
+                                    print(f"📝 [PAPER] ✅ Re-fetched LTP for strike {matched_strike}: ₹{actual_paper_price}")
+                                else:
+                                    print(f"📝 [PAPER] ⚠️ Re-fetch returned 0, using original LTP ₹{paper_price}")
+                            else:
+                                print(f"📝 [PAPER] ⚠️ Ticker API failed, using original LTP ₹{paper_price}")
+                        else:
+                            print(f"📝 [PAPER] ⚠️ Could not resolve sec_id for strike {matched_strike}, using original LTP ₹{paper_price}")
+                    except Exception as refetch_err:
+                        print(f"📝 [PAPER] ⚠️ LTP re-fetch error: {refetch_err}, using original LTP ₹{paper_price}")
+                
+                buy_p = float(matched_paper.get('buy_price', 0) or 0)
+                paper_pl = (actual_paper_price - buy_p) * matched_qty
+                matched_paper['sell_time'] = now_str
+                matched_paper['sell_price'] = str(round(actual_paper_price, 2))
+                matched_paper['p_l'] = str(round(paper_pl, 2))
+                matched_paper['status'] = 'CLOSED'
+                matched_paper['remarks'] = f"Paper exit at LTP ₹{actual_paper_price} | P&L: ₹{round(paper_pl, 2)}"
+                save_all_paper_trades(paper_trades)
+                print(f"📝 [PAPER] Logged SELL: {matched_paper['trade_id']} | Strike: {matched_strike} | LTP: ₹{actual_paper_price} | Qty: {matched_qty} | P&L: ₹{round(paper_pl, 2)}")
+            else:
                 paper_id = "P-" + str(uuid.uuid4())[:6]
-                paper_trade = {
+                orphan_paper = {
                     "trade_id": paper_id,
                     "symbol": str(base_symbol),
                     "option_type": str(option_type),
                     "strike": str(strike),
                     "quantity": str(quantity_val),
-                    "buy_time": now_str,
-                    "buy_price": str(round(paper_price, 2)),
-                    "sell_time": "",
-                    "sell_price": "",
+                    "buy_time": "",
+                    "buy_price": "",
+                    "sell_time": now_str,
+                    "sell_price": str(round(paper_price, 2)),
                     "p_l": "0.0",
-                    "status": "OPEN",
+                    "status": "ORPHAN",
                     "ltp_source": ltp_source,
-                    "remarks": f"Paper entry at LTP ₹{paper_price}"
+                    "remarks": f"Paper orphan exit at LTP ₹{paper_price}"
                 }
-                paper_trades.append(paper_trade)
+                paper_trades.append(orphan_paper)
                 save_all_paper_trades(paper_trades)
-                print(f"📝 [PAPER] Logged BUY: {paper_id} | Strike: {strike} | LTP: ₹{paper_price}")
-                
-            elif side_str == 'SELL':
-                # Match with latest open paper trade of same option type
-                matched_paper = None
-                for pt in reversed(paper_trades):
-                    if pt.get('option_type') == option_type and pt.get('status') == 'OPEN':
-                        matched_paper = pt
-                        break
-                
-                if matched_paper:
-                    # FIX #1: Use the MATCHED trade's quantity for P&L, not the webhook's
-                    matched_qty = int(matched_paper.get('quantity', 0) or 0)
-                    
-                    # FIX #2: If matched paper trade's strike differs from the real order's strike,
-                    # re-fetch LTP for the CORRECT strike so exit price is accurate
-                    matched_strike = matched_paper.get('strike', '')
-                    actual_paper_price = paper_price  # default: use the already-fetched LTP
-                    
-                    if str(matched_strike) != str(strike) and matched_strike:
-                        print(f"📝 [PAPER] Strike mismatch! Real order: {strike} vs Paper trade: {matched_strike}. Re-fetching LTP for {matched_strike}...")
-                        try:
-                            # Resolve the paper trade's strike to its security ID
-                            paper_sec_id, _, _, _ = get_security_id(
-                                data.get('symbol'), price, option_type, matched_strike
-                            )
-                            if paper_sec_id:
-                                seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
-                                securities = {seg_key: [int(paper_sec_id)]}
-                                quote = dhan_live.ticker_data(securities)
-                                if isinstance(quote, dict) and quote.get('status') == 'success':
-                                    outer_data = quote.get('data', {})
-                                    inner_data = outer_data.get('data', {})
-                                    seg_data = inner_data.get(seg_key, {})
-                                    id_data = seg_data.get(str(paper_sec_id), {})
-                                    refetched_ltp = float(id_data.get('last_price', 0))
-                                    if refetched_ltp > 0:
-                                        actual_paper_price = refetched_ltp
-                                        print(f"📝 [PAPER] ✅ Re-fetched LTP for strike {matched_strike}: ₹{actual_paper_price}")
-                                    else:
-                                        print(f"📝 [PAPER] ⚠️ Re-fetch returned 0, using original LTP ₹{paper_price}")
-                                else:
-                                    print(f"📝 [PAPER] ⚠️ Ticker API failed, using original LTP ₹{paper_price}")
-                            else:
-                                print(f"📝 [PAPER] ⚠️ Could not resolve sec_id for strike {matched_strike}, using original LTP ₹{paper_price}")
-                        except Exception as refetch_err:
-                            print(f"📝 [PAPER] ⚠️ LTP re-fetch error: {refetch_err}, using original LTP ₹{paper_price}")
-                    
-                    buy_p = float(matched_paper.get('buy_price', 0) or 0)
-                    paper_pl = (actual_paper_price - buy_p) * matched_qty
-                    matched_paper['sell_time'] = now_str
-                    matched_paper['sell_price'] = str(round(actual_paper_price, 2))
-                    matched_paper['p_l'] = str(round(paper_pl, 2))
-                    matched_paper['status'] = 'CLOSED'
-                    matched_paper['remarks'] = f"Paper exit at LTP ₹{actual_paper_price} | P&L: ₹{round(paper_pl, 2)}"
-                    save_all_paper_trades(paper_trades)
-                    print(f"📝 [PAPER] Logged SELL: {matched_paper['trade_id']} | Strike: {matched_strike} | LTP: ₹{actual_paper_price} | Qty: {matched_qty} | P&L: ₹{round(paper_pl, 2)}")
-                else:
-                    paper_id = "P-" + str(uuid.uuid4())[:6]
-                    orphan_paper = {
-                        "trade_id": paper_id,
-                        "symbol": str(base_symbol),
-                        "option_type": str(option_type),
-                        "strike": str(strike),
-                        "quantity": str(quantity_val),
-                        "buy_time": "",
-                        "buy_price": "",
-                        "sell_time": now_str,
-                        "sell_price": str(round(paper_price, 2)),
-                        "p_l": "0.0",
-                        "status": "ORPHAN",
-                        "ltp_source": ltp_source,
-                        "remarks": f"Paper orphan exit at LTP ₹{paper_price}"
-                    }
-                    paper_trades.append(orphan_paper)
-                    save_all_paper_trades(paper_trades)
-                    print(f"📝 [PAPER] Logged Orphan SELL: {paper_id} | Strike: {strike} | LTP: ₹{paper_price}")
+                print(f"📝 [PAPER] Logged Orphan SELL: {paper_id} | Strike: {strike} | LTP: ₹{paper_price}")
 
         print(f"[BG] ✅ Order processing complete for {side_str} {symbol}")
 
