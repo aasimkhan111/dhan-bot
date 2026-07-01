@@ -2891,7 +2891,21 @@ def api_pull_and_reload():
     success = run_and_log_command(["git", "pull", "origin", "main"])
     if success:
         print("✅ Git Pull completed on EC2! Reloading new credentials...")
-        return jsonify({"status": "success", "message": "Git pull and configuration reload completed on EC2!"}), 200
+        
+        # Restart the server process to apply the pulled code
+        def restart_server():
+            time.sleep(1) # Let the response send first
+            print("🔄 Restarting server process to apply new code...")
+            try:
+                import sys
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+            except Exception as e:
+                print(f"Failed to execv: {e}. Exiting process so process manager restarts it...")
+                os._exit(0)
+                
+        threading.Thread(target=restart_server, daemon=True).start()
+        
+        return jsonify({"status": "success", "message": "Git pull completed and server is reloading!"}), 200
     else:
         print("❌ Git pull failed on EC2.")
         return jsonify({"status": "failed", "message": "Git pull failed on EC2."}), 500
