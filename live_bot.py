@@ -176,8 +176,13 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
                 if price == 0:
                     print(f"Error: price=0 received for {symbol} request.")
                     return None, None, None, None
-                # Calculate Strike (Step of 100 for BankNifty, 50 for Nifty)
-                step = 100 if "BANKNIFTY" in base else 50
+                # Calculate Strike (Step of 100 for BankNifty & CrudeOil, 50 for Nifty)
+                if "BANKNIFTY" in base:
+                    step = 100
+                elif "CRUDEOIL" in base:
+                    step = 100  # Crude Oil option strikes are ₹100 apart
+                else:
+                    step = 50   # Nifty default
                 
                 # Apply ITM Offset (100 points per level for BankNifty, 50 for Nifty)
                 if "-ITM" in symbol:
@@ -203,12 +208,24 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
             print(f"[ATM/ITM] Using {symbol} logic for {base}: Strike {strike}")
             
             # Find the option with this strike and nearest expiry
-            match = df[(df['SEM_INSTRUMENT_NAME'] == 'OPTIDX') & 
+            # Use OPTFUT for MCX commodities (CrudeOil), OPTIDX for NSE indices
+            if "CRUDEOIL" in base:
+                inst_type = 'OPTFUT'
+                exch_filter = 'MCX'
+            else:
+                inst_type = 'OPTIDX'
+                exch_filter = None  # existing NSE logic (no explicit filter needed)
+            
+            match = df[(df['SEM_INSTRUMENT_NAME'] == inst_type) & 
                        (df['SEM_STRIKE_PRICE'].astype(float) == float(strike)) &
                        (df['SEM_OPTION_TYPE'] == option_type) &
                        ((df['SM_SYMBOL_NAME'].str.contains(base, case=False, na=False)) | 
                         (df['SEM_CUSTOM_SYMBOL'].str.contains(base, case=False, na=False)) |
                         (df['SEM_TRADING_SYMBOL'].str.contains(base, case=False, na=False)))]
+            
+            # Apply exchange filter for MCX
+            if exch_filter and not match.empty:
+                match = match[match['SEM_EXM_EXCH_ID'] == exch_filter]
             
             if match.empty:
                 print(f"Warning: No strike {strike} found for {base}.")
@@ -221,9 +238,13 @@ def get_security_id(symbol, price=0, option_type=None, manual_strike=None):
                        (df['SEM_EXM_EXCH_ID'] == 'NSE')]
         else:
             # Regular exact match
-            match = df[(df['SEM_TRADING_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
+            # Check if this is an MCX symbol
+            is_mcx = "CRUDEOIL" in symbol or "NATURALGAS" in symbol or "GOLD" in symbol or "SILVER" in symbol
+            allowed_exchanges = ['MCX'] if is_mcx else ['NSE', 'NFO']
+            
+            match = df[(df['SEM_TRADING_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(allowed_exchanges))]
             if match.empty:
-                match = df[(df['SEM_CUSTOM_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(['NSE', 'NFO']))]
+                match = df[(df['SEM_CUSTOM_SYMBOL'].str.upper() == symbol) & (df['SEM_EXM_EXCH_ID'].isin(allowed_exchanges))]
 
         if not match.empty:
             # Sort by expiry to get the nearest one safely
@@ -384,7 +405,10 @@ _order_lock = threading.Lock()
 
 def _process_order_async(data, config):
     """Background worker: resolves strike, places order, polls status, logs trade.
-    Runs in a daemon thread so TradingView gets an instant 200 OK."""
+    Runs in a daemon thread so TradingView gets an instant 200 OK.
+    
+    Supports side='FLIP' for Crude Oil: auto-closes opposite position then opens new one.
+    e.g. FLIP with option_type=CE → close any open PE, then open CE."""
     _order_lock.acquire()
     try:
         symbol = data.get('symbol')
@@ -394,40 +418,101 @@ def _process_order_async(data, config):
         
         order_type_str = data.get('order_type', 'MARKET').upper()
         side_str = data.get('side', 'BUY').upper()
+        
+        # --- Detect instrument for per-instrument position tracking ---
+        # This ensures BankNifty positions don't block CrudeOil and vice versa
+        symbol_upper = (symbol or '').upper()
+        if "CRUDEOIL" in symbol_upper:
+            instrument_id = "CRUDEOIL"
+        elif "BANKNIFTY" in symbol_upper:
+            instrument_id = "BANKNIFTY"
+        elif "NIFTY" in symbol_upper:
+            instrument_id = "NIFTY"
+        else:
+            instrument_id = symbol_upper.split("-")[0] if symbol_upper else "UNKNOWN"
+        
+        print(f"[BG] Instrument detected: {instrument_id}")
+
+        # === FLIP LOGIC (for Crude Oil bi-directional trading) ===
+        # FLIP with option_type=CE means: close any open PE position, then BUY CE
+        # FLIP with option_type=PE means: close any open CE position, then BUY PE
+        if side_str == 'FLIP':
+            opposite_type = 'PE' if option_type == 'CE' else 'CE'
+            print(f"[BG] 🔄 FLIP signal received: Close {opposite_type}, then Open {option_type} for {instrument_id}")
+            
+            # Step 1: Check if there's an opposite position to close
+            from datetime import datetime
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            all_real = [t for t in get_all_trades() if t.get('buy_time', '').startswith(today_str)]
+            all_paper = [pt for pt in get_all_paper_trades() if pt.get('buy_time', '').startswith(today_str)]
+            
+            has_opposite_real = any(
+                t.get('option_type') == opposite_type and t.get('status', '').startswith('OPEN')
+                and instrument_id in t.get('symbol', '').upper()
+                for t in all_real
+            )
+            has_opposite_paper = any(
+                pt.get('option_type') == opposite_type and pt.get('status') == 'OPEN'
+                and instrument_id in pt.get('symbol', '').upper()
+                for pt in all_paper
+            )
+            
+            if has_opposite_real or has_opposite_paper:
+                # Fire a SELL for the opposite position first
+                print(f"[BG] 🔄 FLIP Step 1: Closing open {opposite_type} position for {instrument_id}...")
+                sell_data = dict(data)
+                sell_data['side'] = 'SELL'
+                sell_data['option_type'] = opposite_type
+                # Release lock, process SELL, re-acquire for BUY
+                _order_lock.release()
+                _process_order_async(sell_data, config)
+                _order_lock.acquire()
+                print(f"[BG] 🔄 FLIP Step 1 complete. Now opening {option_type}...")
+            else:
+                print(f"[BG] 🔄 FLIP: No open {opposite_type} position to close. Proceeding directly to BUY {option_type}.")
+            
+            # Step 2: Continue as a normal BUY
+            side_str = 'BUY'
 
         # === PREVENT MULTIPLE OPEN POSITIONS AND ORPHAN SELLS ===
         from datetime import datetime
         today_str = datetime.now().strftime("%Y-%m-%d")
         
-        # Only consider trades opened TODAY to avoid hanging bugs from previous days
-        real_trades = [t for t in get_all_trades() if t.get('buy_time', '').startswith(today_str)]
-        paper_trades = [pt for pt in get_all_paper_trades() if pt.get('buy_time', '').startswith(today_str)]
+        # Only consider trades opened TODAY for THIS INSTRUMENT
+        real_trades = [t for t in get_all_trades() 
+                       if t.get('buy_time', '').startswith(today_str)
+                       and instrument_id in t.get('symbol', '').upper()]
+        paper_trades = [pt for pt in get_all_paper_trades() 
+                        if pt.get('buy_time', '').startswith(today_str)
+                        and instrument_id in pt.get('symbol', '').upper()]
         
-        # 1. If side is BUY, ignore if ANY open position already exists (Real OR Paper)
+        # 1. If side is BUY, ignore if an open position already exists for THIS INSTRUMENT
         if side_str == 'BUY':
             has_open_real = any(t.get('status', '').startswith('OPEN') for t in real_trades)
             has_open_paper = any(pt.get('status') == 'OPEN' for pt in paper_trades)
             if has_open_real or has_open_paper:
-                print(f"[BG] ⚠️ Ignoring BUY signal for {symbol} ({option_type}). An open position already exists today. Waiting for SELL signal.")
+                print(f"[BG] ⚠️ Ignoring BUY signal for {symbol} ({option_type}). An open {instrument_id} position already exists today.")
                 return
                 
-        # 2. If side is SELL, ignore if NO open position exists for this option type
+        # 2. If side is SELL, ignore if NO open position exists for this option type AND instrument
         elif side_str == 'SELL':
             has_open_real = any(t.get('option_type') == option_type and t.get('status', '').startswith('OPEN') for t in real_trades)
             has_open_paper = any(pt.get('option_type') == option_type and pt.get('status') == 'OPEN' for pt in paper_trades)
             if not has_open_real and not has_open_paper:
-                print(f"[BG] ⚠️ Ignoring SELL signal for {symbol} ({option_type}). No open position exists today to close.")
+                print(f"[BG] ⚠️ Ignoring SELL signal for {symbol} ({option_type}). No open {instrument_id} position exists today to close.")
                 return
 
         # === SELL STRIKE AUTO-MATCH ===
         # For SELL orders: If no itm_strike provided, auto-match from trade journal
         # so we sell the EXACT same option we bought (not a new ATM strike)
         if side_str == 'SELL' and not manual_strike:
-            print(f"[SELL Auto-Match] No itm_strike in webhook. Searching trade journal for open {option_type} position...")
+            print(f"[SELL Auto-Match] No itm_strike in webhook. Searching trade journal for open {option_type} {instrument_id} position...")
             open_trades = get_all_trades()
             matched_open = None
             for t in reversed(open_trades):
-                if t.get('option_type') == option_type and t.get('status', '').startswith('OPEN'):
+                if (t.get('option_type') == option_type 
+                    and t.get('status', '').startswith('OPEN')
+                    and instrument_id in t.get('symbol', '').upper()):
                     matched_open = t
                     break
             
@@ -435,11 +520,11 @@ def _process_order_async(data, config):
                 journal_strike = matched_open.get('strike', '')
                 if journal_strike:
                     manual_strike = journal_strike
-                    print(f"[SELL Auto-Match] ✅ Found open {option_type} position with Strike: {manual_strike} (Trade ID: {matched_open.get('trade_id')})")
+                    print(f"[SELL Auto-Match] ✅ Found open {option_type} {instrument_id} position with Strike: {manual_strike} (Trade ID: {matched_open.get('trade_id')})")
                 else:
                     print(f"[SELL Auto-Match] ⚠️ Open trade found but no strike recorded. Falling back to dynamic calculation.")
             else:
-                print(f"[SELL Auto-Match] ⚠️ No open {option_type} position in journal. Using dynamic strike calculation.")
+                print(f"[SELL Auto-Match] ⚠️ No open {option_type} {instrument_id} position in journal. Using dynamic strike calculation.")
 
         # Resolve exact Security ID, Instrument Type, Strike, and Base Symbol
         sec_id, inst_name, strike, base_symbol = get_security_id(symbol, price, option_type, manual_strike)
@@ -453,7 +538,9 @@ def _process_order_async(data, config):
         dhan_live = dhanhq(dhan_context)
         
         # FORCE CORRECT SEGMENT
-        if inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK']:
+        if inst_name in ['OPTFUT', 'FUTCOM']:
+            exch_seg = dhan_live.MCX_COMM  # MCX Commodities (CrudeOil, NaturalGas, etc.)
+        elif inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK']:
             exch_seg = dhan_live.NSE_FNO
         else:
             exch_seg = dhan_live.NSE
@@ -462,7 +549,12 @@ def _process_order_async(data, config):
         print(f"Fetching Option LTP for ID: {sec_id} (journal reference only)...")
         option_ltp = 0.0
         try:
-            seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
+            if exch_seg == dhan_live.MCX_COMM:
+                seg_key = "MCX_COMM"
+            elif exch_seg == dhan_live.NSE_FNO:
+                seg_key = "NSE_FNO"
+            else:
+                seg_key = "NSE"
             securities = {seg_key: [int(sec_id)]}
             quote = dhan_live.ticker_data(securities)
             print(f"Raw Ticker Response: {quote}")
@@ -573,7 +665,12 @@ def _process_order_async(data, config):
             # Last resort: re-fetch LTP right now
             trade_price = 0.0
             try:
-                seg_key = "NSE_FNO" if exch_seg == dhan_live.NSE_FNO else "NSE"
+                if exch_seg == dhan_live.MCX_COMM:
+                    seg_key = "MCX_COMM"
+                elif exch_seg == dhan_live.NSE_FNO:
+                    seg_key = "NSE_FNO"
+                else:
+                    seg_key = "NSE"
                 securities = {seg_key: [int(sec_id)]}
                 quote = dhan_live.ticker_data(securities)
                 if isinstance(quote, dict) and quote.get('status') == 'success':
@@ -616,11 +713,13 @@ def _process_order_async(data, config):
             save_all_trades(trades)
             
         elif side_str == 'SELL':
-            # Match with the latest open trade of same option type (CE or PE)
+            # Match with the latest open trade of same option type AND instrument (CE or PE)
             matched_trade = None
             for t in reversed(trades):
                 status_check = t.get('status', '')
-                if t.get('option_type') == option_type and status_check.startswith('OPEN'):
+                if (t.get('option_type') == option_type 
+                    and status_check.startswith('OPEN')
+                    and instrument_id in t.get('symbol', '').upper()):
                     matched_trade = t
                     break
                     
@@ -703,10 +802,12 @@ def _process_order_async(data, config):
             print(f"📝 [PAPER] Logged BUY: {paper_id} | Strike: {strike} | LTP: ₹{paper_price}")
             
         elif side_str == 'SELL':
-            # Match with latest open paper trade of same option type
+            # Match with latest open paper trade of same option type AND instrument
             matched_paper = None
             for pt in reversed(paper_trades):
-                if pt.get('option_type') == option_type and pt.get('status') == 'OPEN':
+                if (pt.get('option_type') == option_type 
+                    and pt.get('status') == 'OPEN'
+                    and instrument_id in pt.get('symbol', '').upper()):
                     matched_paper = pt
                     break
             
