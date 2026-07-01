@@ -284,7 +284,7 @@ JOURNAL_FILE = "trade_journal.csv"
 def init_journal():
     if not os.path.exists(JOURNAL_FILE):
         try:
-            with open(JOURNAL_FILE, 'w', newline='') as f:
+            with open(JOURNAL_FILE, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 writer.writerow([
                     "trade_id", "symbol", "option_type", "strike", "quantity",
@@ -300,7 +300,7 @@ def get_all_trades():
     trades = []
     if os.path.exists(JOURNAL_FILE):
         try:
-            with open(JOURNAL_FILE, 'r') as f:
+            with open(JOURNAL_FILE, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     trades.append(row)
@@ -310,7 +310,7 @@ def get_all_trades():
 
 def save_all_trades(trades):
     try:
-        with open(JOURNAL_FILE, 'w', newline='') as f:
+        with open(JOURNAL_FILE, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow([
                 "trade_id", "symbol", "option_type", "strike", "quantity",
@@ -343,7 +343,7 @@ PAPER_JOURNAL_FILE = "paper_journal.csv"
 def init_paper_journal():
     if not os.path.exists(PAPER_JOURNAL_FILE):
         try:
-            with open(PAPER_JOURNAL_FILE, 'w', newline='') as f:
+            with open(PAPER_JOURNAL_FILE, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 writer.writerow([
                     "trade_id", "symbol", "option_type", "strike", "quantity",
@@ -359,7 +359,7 @@ def get_all_paper_trades():
     trades = []
     if os.path.exists(PAPER_JOURNAL_FILE):
         try:
-            with open(PAPER_JOURNAL_FILE, 'r') as f:
+            with open(PAPER_JOURNAL_FILE, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     trades.append(row)
@@ -369,7 +369,7 @@ def get_all_paper_trades():
 
 def save_all_paper_trades(trades):
     try:
-        with open(PAPER_JOURNAL_FILE, 'w', newline='') as f:
+        with open(PAPER_JOURNAL_FILE, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow([
                 "trade_id", "symbol", "option_type", "strike", "quantity",
@@ -539,7 +539,7 @@ def _process_order_async(data, config):
         
         # FORCE CORRECT SEGMENT
         if inst_name in ['OPTFUT', 'FUTCOM']:
-            exch_seg = dhan_live.MCX_COMM  # MCX Commodities (CrudeOil, NaturalGas, etc.)
+            exch_seg = dhan_live.MCX  # MCX Commodities (CrudeOil, NaturalGas, etc.)
         elif inst_name in ['OPTIDX', 'OPTSTK', 'FUTIDX', 'FUTSTK']:
             exch_seg = dhan_live.NSE_FNO
         else:
@@ -549,7 +549,7 @@ def _process_order_async(data, config):
         print(f"Fetching Option LTP for ID: {sec_id} (journal reference only)...")
         option_ltp = 0.0
         try:
-            if exch_seg == dhan_live.MCX_COMM:
+            if exch_seg == dhan_live.MCX:
                 seg_key = "MCX_COMM"
             elif exch_seg == dhan_live.NSE_FNO:
                 seg_key = "NSE_FNO"
@@ -665,7 +665,7 @@ def _process_order_async(data, config):
             # Last resort: re-fetch LTP right now
             trade_price = 0.0
             try:
-                if exch_seg == dhan_live.MCX_COMM:
+                if exch_seg == dhan_live.MCX:
                     seg_key = "MCX_COMM"
                 elif exch_seg == dhan_live.NSE_FNO:
                     seg_key = "NSE_FNO"
@@ -902,7 +902,7 @@ def webhook():
     # Log what we received for debugging
     side_str = data.get('side', 'BUY').upper()
     symbol = data.get('symbol', '?')
-    print(f"⚡ Webhook received: {side_str} {symbol} — dispatching to background thread...")
+    print(f"[SIGNAL] Webhook received: {side_str} {symbol} — dispatching to background thread...")
 
     # Fire-and-forget: launch order processing in a daemon background thread
     worker = threading.Thread(target=_process_order_async, args=(data, config), daemon=True)
@@ -2902,5 +2902,6 @@ if __name__ == '__main__':
     dhan_context = DhanContext(client_id=global_config.get('CLIENT_ID'), access_token=global_config.get('ACCESS_TOKEN'))
     dhan = dhanhq(dhan_context)
     
-    # Listen on all public IPs on port 80
-    app.run(host='0.0.0.0', port=80)
+    # Listen on port specified by environment variable, or default to 80
+    port_val = int(os.environ.get("PORT", 80))
+    app.run(host='0.0.0.0', port=port_val)
